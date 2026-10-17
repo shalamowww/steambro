@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>steambro</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="choice.js" defer></script>
+  <script src="logos.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!-- The window has no Windows title bar. Empty parts marked data-drag move the window (app.js). -->
+  <aside class="sidebar" aria-label="Library">
+    <div class="brand" data-drag>
+      <span class="logo-box"><img id="logo" src="logo-wink.svg" alt="steambro" width="128" height="128" draggable="false"></span>
+      <span class="brand-name">steambro</span>
+    </div>
+    <div class="side-head">
+      <button class="side-title" id="all-games" title="Show all games as tiles">Library <span class="count" id="all-count"></span></button>
+      <button class="icon-button small" id="refresh" title="Look for games again" aria-label="Look for games again">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+      </button>
+      <button class="icon-button small" id="add-exe" title="Add a game by its exe" aria-label="Add a game by its exe">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+    <nav class="sections" id="sections" aria-label="Games by status"></nav>
+    <div class="side-foot">
+      <span class="account" id="account"></span>
+      <button class="icon-button" id="open-settings" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="content">
+    <!-- Window buttons, cut into the content's top right corner so they show over any artwork -->
+    <div class="window-controls">
+      <button class="wc" id="wc-min" title="Minimize" aria-label="Minimize">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10"/></svg>
+      </button>
+      <button class="wc" id="wc-max" title="Maximize" aria-label="Maximize">
+        <svg class="max" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"/></svg>
+        <svg class="restore" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5V0.5h7v7h-2M0.5 2.5h7v7h-7z"/></svg>
+      </button>
+      <button class="wc close" id="wc-close" title="Close to the tray" aria-label="Close to the tray">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9"/></svg>
+      </button>
+    </div>
+
+    <section id="tiles" class="view tiles" aria-label="Games">
+      <header class="tiles-head" data-drag>
+        <div class="tiles-heading">
+          <h1 id="tiles-title"></h1>
+          <p id="tiles-hint"></p>
+        </div>
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="search" type="search" placeholder="Search here" autocomplete="off" spellcheck="false" aria-label="Search the games shown">
+        </label>
+      </header>
+      <div class="toolbar">
+        <div class="tags" id="tags" role="group" aria-label="Show games from these stores"></div>
+      </div>
+      <div id="library" class="library"></div>
+      <!-- Shown while games are selected; as tall as the sidebar's bottom bar -->
+      <div class="selection-bar" id="selection" hidden></div>
+    </section>
+    <section id="detail" class="view detail" hidden aria-label="Game"></section>
+    <section id="settings" class="view settings" hidden aria-label="Settings"></section>
+
+    <div id="notices" class="notices"></div>
+  </main>
+
+  <div id="toasts" class="toasts" role="status"></div>
+  <dialog id="dialog" class="dialog"></dialog>
+  <dialog id="progress" class="dialog progress" aria-label="Changing Steam"></dialog>
+  <div id="menu" class="menu" role="menu" hidden></div>
+  <input type="file" id="file" accept="image/png,image/jpeg,image/webp" hidden>
+</body>
+</html>

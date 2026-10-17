@@ -1,0 +1,69 @@
+[package]
+name = "steambro"
+version = "0.0.1"
+edition = "2024"
+description = "Your Xbox, Game Pass, Battle.net, Epic, and GOG games in Steam, done properly"
+repository = "https://github.com/shalamowww/steambro"
+license = "GPL-3.0-only"
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+# Decodes the Epic Games launcher's catalog cache.
+base64 = "0.22"
+clap = { version = "4.6.7", features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "ico"] }
+# Decodes the game keys that the window URL-encodes.
+percent-encoding = "2.3.2"
+roxmltree = "0.21.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+# The UI is served from the files built into the exe; steambro never uses a dev server.
+tauri = { version = "2.12.4", features = ["tray-icon", "custom-protocol"] }
+tauri-plugin-single-instance = "2.5.4"
+# Talks to the ViGEmBus driver for the Steam Input bridge (src/bridge.rs); the notifications carry
+# the game's rumble.
+vigem-client = { version = "0.1.4", features = ["unstable_xtarget_notification"] }
+windows = { version = "0.62.2", features = [
+    "ApplicationModel",
+    "ApplicationModel_Core",
+    "Foundation",
+    "Foundation_Collections",
+    "Management_Deployment",
+    "Storage",
+    "Storage_Streams",
+    "Web_Http",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_XboxController",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-registry = "0.6"
+
+[profile.release]
+# Releases leave out the symbol table, a third of the exe.
+strip = true
