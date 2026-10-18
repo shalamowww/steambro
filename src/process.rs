@@ -1,11 +1,11 @@
-//! Running processes, through the Windows process snapshot, and a job object that ends a game
-//! with `steambro launch`.
+//! Processes: starting an exe as a child of `steambro launch`, the running processes (the Windows
+//! process snapshot), and the job object that ends a game with the launch.
 
 use std::collections::HashSet;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, E_ACCESSDENIED, HANDLE};
 use windows::Win32::Storage::Packaging::Appx::GetPackageFamilyName;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -24,8 +24,8 @@ use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
 
 /// Starts an exe as this process's child, so it's part of Steam's launch. An exe that needs
 /// administrator rights, like an old game that Windows' compatibility settings mark so, fails that
-/// way (error 740); it starts through Windows' prompt instead, and isn't a child then. Returns
-/// whether it needed the prompt.
+/// way (error 740); it starts through Windows' prompt instead. Then it isn't a child, and Steam
+/// can't see it. Returns whether it needed the prompt.
 pub fn start(exe: &Path, args: &str, dir: &Path) -> crate::Result<bool> {
     let mut command = std::process::Command::new(exe);
     command.current_dir(dir);
@@ -59,6 +59,7 @@ pub struct Process {
     pub name: String,
 }
 
+/// The running processes, from the Windows process snapshot.
 pub fn list() -> Vec<Process> {
     let mut found = Vec::new();
     let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else { return found };
@@ -73,6 +74,7 @@ pub fn list() -> Vec<Process> {
     found
 }
 
+/// Whether a process with this executable file name runs, like `steam.exe`.
 pub fn is_running(name: &str) -> bool {
     list().iter().any(|p| p.name.eq_ignore_ascii_case(name))
 }
@@ -113,60 +115,86 @@ pub fn package_family(pid: u32) -> Option<String> {
 /// its limit: a store app left open, or a crash reporter, keeps running.
 pub struct Job {
     handle: HANDLE,
+    /// Jobs of their own for game processes that Windows already keeps in a job, as it does Xbox
+    /// games. Such a process can join only a job that is empty or in its own nest of jobs, and
+    /// the launch is in the first one.
+    others: Vec<HANDLE>,
     /// Processes added, or that couldn't be added; each is tried once.
     tried: HashSet<u32>,
 }
 
 impl Job {
+    /// Creates the job and puts this process in it, so that every process it starts later is in
+    /// the job too.
     pub fn new() -> crate::Result<Self> {
-        let handle = unsafe { CreateJobObjectW(None, PCWSTR::null()) }?;
-        let job = Self { handle, tried: HashSet::new() };
-        job.set_kill_on_close(true)?;
-        unsafe { AssignProcessToJobObject(handle, GetCurrentProcess()) }?;
+        let job = Self { handle: kill_on_close_job()?, others: Vec::new(), tried: HashSet::new() };
+        unsafe { AssignProcessToJobObject(job.handle, GetCurrentProcess()) }?;
         Ok(job)
     }
 
-    /// Adds the process, unless it's in the job already. `Ok(false)` when it was tried before. A
-    /// process can be in several nested jobs, so a game that Windows already keeps in one can
-    /// still be added.
+    /// Adds the process, unless it's in the job already. `Ok(false)` when it was tried before.
     pub fn add(&mut self, pid: u32) -> crate::Result<bool> {
         if !self.tried.insert(pid) {
             return Ok(false);
         }
         let process = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }?;
-        let mut inside = BOOL(0);
-        let result = unsafe { IsProcessInJob(process, Some(self.handle), &mut inside) }
-            .and_then(|()| if inside.as_bool() { Ok(()) } else { unsafe { AssignProcessToJobObject(self.handle, process) } });
+        let result = self.assign(process);
         let _ = unsafe { CloseHandle(process) };
         result?;
         Ok(true)
     }
 
-    /// A process that starts with `CREATE_BREAKAWAY_FROM_JOB`, as some launchers start their
-    /// game, leaves the job instead of failing to start; the launch adds the game again.
-    fn set_kill_on_close(&self, on: bool) -> crate::Result<()> {
-        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-        if on {
-            info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    fn assign(&mut self, process: HANDLE) -> crate::Result<()> {
+        for &job in std::iter::once(&self.handle).chain(&self.others) {
+            let mut inside = BOOL(0);
+            unsafe { IsProcessInJob(process, Some(job), &mut inside) }?;
+            if inside.as_bool() {
+                return Ok(());
+            }
         }
-        unsafe {
-            SetInformationJobObject(
-                self.handle,
-                JobObjectExtendedLimitInformation,
-                (&raw const info).cast(),
-                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        }?;
-        Ok(())
+        match unsafe { AssignProcessToJobObject(self.handle, process) } {
+            Err(e) if e.code() == E_ACCESSDENIED => {
+                let other = kill_on_close_job()?;
+                // Kept even if the process can't join it, so that dropping the job closes it.
+                self.others.push(other);
+                unsafe { AssignProcessToJobObject(other, process) }?;
+                Ok(())
+            }
+            result => Ok(result?),
+        }
     }
 }
 
 impl Drop for Job {
     fn drop(&mut self) {
-        let _ = self.set_kill_on_close(false);
-        let _ = unsafe { CloseHandle(self.handle) };
+        for &job in std::iter::once(&self.handle).chain(&self.others) {
+            let _ = set_limits(job, false);
+            let _ = unsafe { CloseHandle(job) };
+        }
     }
+}
+
+fn kill_on_close_job() -> crate::Result<HANDLE> {
+    let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }?;
+    if let Err(e) = set_limits(job, true) {
+        let _ = unsafe { CloseHandle(job) };
+        return Err(e);
+    }
+    Ok(job)
+}
+
+/// A process that starts with `CREATE_BREAKAWAY_FROM_JOB`, as some launchers start their game,
+/// leaves the job instead of failing to start; the launch adds the game again.
+fn set_limits(job: HANDLE, kill_on_close: bool) -> crate::Result<()> {
+    let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+    if kill_on_close {
+        info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    }
+    unsafe {
+        SetInformationJobObject(job, JobObjectExtendedLimitInformation, (&raw const info).cast(), size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32)
+    }?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -182,5 +210,27 @@ mod tests {
         let running = child.try_wait().unwrap().is_none();
         let _ = child.kill();
         assert!(running, "the job ended the child when it was dropped");
+    }
+
+    #[test]
+    fn a_process_in_another_job_is_added_too() {
+        let mut child = std::process::Command::new("ping").args(["-n", "5", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
+        // Windows keeps an Xbox game in a job of its own.
+        let windows_job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }.unwrap();
+        let process = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, false, child.id()) }.unwrap();
+        unsafe { AssignProcessToJobObject(windows_job, process) }.unwrap();
+        let mut job = Job::new().unwrap();
+        let added = job.add(child.id());
+        let inside = std::iter::once(&job.handle).chain(&job.others).any(|&j| {
+            let mut inside = BOOL(0);
+            unsafe { IsProcessInJob(process, Some(j), &mut inside) }.is_ok() && inside.as_bool()
+        });
+        drop(job);
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = unsafe { CloseHandle(process) };
+        let _ = unsafe { CloseHandle(windows_job) };
+        added.unwrap();
+        assert!(inside, "the process isn't in the launch's jobs");
     }
 }
