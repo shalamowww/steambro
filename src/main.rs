@@ -1,3 +1,7 @@
+//! steambro: one Windows executable that is the tray app, a small command line (`list`), and the
+//! program that each Steam shortcut runs (`launch`). Steam tracks that program as the game, so it
+//! must live exactly as long as the game.
+
 // A windowed app, so neither the tray app nor a game started through Steam opens a console.
 #![windows_subsystem = "windows"]
 
@@ -11,6 +15,7 @@ mod launch;
 mod library;
 mod log;
 mod overlay;
+mod plan;
 mod process;
 mod prompt;
 mod settings;
@@ -107,7 +112,8 @@ fn main() -> ExitCode {
     }
 }
 
-/// `%LOCALAPPDATA%\steambro`: steambro's state, its copies of artwork, and its log.
+/// `%LOCALAPPDATA%\steambro`: steambro's own files: the state, the settings, the art cache, the
+/// log, and the files of running launches (their questions and layout markers).
 pub fn data_dir() -> Result<PathBuf> {
     // Tests never touch the user's real state.
     if cfg!(test) {

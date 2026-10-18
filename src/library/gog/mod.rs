@@ -1,12 +1,13 @@
 //! GOG: games that GOG Galaxy or a GOG installer recorded in the registry, artwork from GOG's
 //! public catalog, started directly. GOG games have no DRM, so `steambro launch` starts the game's
-//! exe as its own child, and Steam sees it like a game it started itself.
+//! exe as its own child, and Steam sees it like a game it started itself. GOG Galaxy starts a game
+//! as its own child, outside Steam's launch, so steambro doesn't start games through Galaxy.
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use super::{Game, Started, Store};
+use super::{Game, Started, Store, Unseen};
 use crate::art::{Origin, Slot};
 
 pub struct Gog;
@@ -81,13 +82,22 @@ impl Store for Gog {
         Ok(origins)
     }
 
+    /// A game that runs as administrator starts through Windows' prompt, outside Steam.
+    fn unseen(&self) -> Unseen {
+        Unseen::Admin
+    }
+
     fn launch_description(&self, game: &Game) -> String {
         let task = game.details::<Task>();
         format!("\"{}\" {}", task.exe.display(), task.args).trim_end().to_string()
     }
 
-    /// Starts the exe directly. A game that Windows runs as administrator, as GOG sets up some old
-    /// games, starts through Windows' prompt instead, outside Steam's view.
+    /// Starts the exe directly. GOG sets up some old games with Windows' compatibility layers
+    /// (`AppCompatFlags\Layers` in the registry), like `RUNASADMIN WINXPSP3`, and a Windows XP mode
+    /// alone needs administrator rights too. Such a game starts through Windows' prompt, outside
+    /// Steam's launch: Steam's overlay doesn't load into it, and steambro can't end it. steambro
+    /// keeps GOG's layers: `__COMPAT_LAYER` with `!` skips the prompt but drops every layer of the
+    /// exe, the XP mode too.
     fn start(&self, game: &Game) -> crate::Result<Started> {
         let task = game.details::<Task>();
         let elevated = crate::process::start(&task.exe, &task.args, &task.dir)?;
@@ -96,7 +106,6 @@ impl Store for Gog {
             packages: Vec::new(),
             not_started: format!("{} didn't start. Try starting it from its folder.", task.exe.display()),
             nudge: None,
-            start_timeout: None,
             outside_steam: elevated,
             after: None,
         })

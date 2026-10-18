@@ -3,7 +3,12 @@
 // steambro's window. Talks to the Rust side through commands (src/app/commands.rs) and loads
 // artwork through the `art` URL scheme (src/app/protocol.rs). The sidebar lists the games by
 // status; the content shows one status's games as tiles, a game's page, or the settings.
+//
+// The page has no rules of its own about stores, settings, or controllers. Rust sends the
+// results: what a game inherits (`inherited`), when Steam can't see a store's games (`unseen`),
+// a store's values (`values`), and the controller checks (`controllers`). The page shows them.
 
+// Read once at start: a script that replaces `window.__TAURI__.core.invoke` later doesn't reach the page.
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const ART = 'http://art.localhost';
@@ -200,7 +205,11 @@ function frame(g, slot, { fallback, onMissing, crop } = {}) {
 
 // ---------------------------------------------------------------- icons
 
-/** A filled SVG path in a 24 by 24 box, like a store's logo; `outline` draws it as a line. */
+/**
+ * A filled SVG path in a 24 by 24 box, like a store's logo; `outline` draws it as a line. Icons are
+ * SVG elements, not images: the content security policy allows images only from the app and the
+ * `art` scheme, so a `data:` image doesn't load.
+ */
 function pathIcon(d, cls, outline = false) {
   const svg = document.createElementNS(SVG, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -761,7 +770,7 @@ function sourceLabel(g) {
   return g.isApp ? `${g.source} app` : g.source;
 }
 
-/** The store of a game, with its behavior, from the settings view. */
+/** The store of a game, with its values, from the settings view. */
 function storeOf(g) {
   return settingsView && settingsView.stores.find((st) => st.id === g.store);
 }
@@ -805,6 +814,26 @@ function standInParts() {
   ];
 }
 
+/**
+ * When Steam can't see a store's games (`unseen`, from the store's module), as the line before the
+ * rows of what steambro does then. `what` is `store`, `game`, or `app`.
+ */
+function unseenLine(store, what) {
+  const one = what === 'app' ? 'this app' : 'this game';
+  switch (store.unseen) {
+    case 'always':
+      return what === 'store'
+        ? `Windows starts ${store.name} games, so Steam can't see them. steambro stands in for Steam:`
+        : `Windows starts ${one}, so Steam can't see it. steambro stands in for Steam:`;
+    case 'appOutside':
+      return `When ${store.app} stays outside Steam, Steam can't see the game. Then steambro stands in for Steam:`;
+    default:
+      return what === 'store'
+        ? "When a game runs as administrator, Steam can't see it. Then steambro stands in for Steam:"
+        : `If ${one} runs as administrator, Steam can't see it. Then steambro stands in for Steam:`;
+  }
+}
+
 /** The title and help of the rows about a store's own app, like Battle.net. */
 function appParts(app) {
   return {
@@ -831,7 +860,7 @@ function timings(choices, current, format) {
   return all.map((v) => [String(v), format(v)]);
 }
 
-/** The game's own fixes: its overrides of its store's behavior (see the settings page). */
+/** A game's Settings tab: the user's choices for the game, each shown over what it inherits. */
 function behavior(g) {
   const store = storeOf(g);
   if (!store) return null;
@@ -847,12 +876,9 @@ function behavior(g) {
     renderDetail();
   };
   const onOff = (on) => (on ? 'on' : 'off');
-  // A switch of the store's, which the game can turn on or off for itself.
+  // A switch the game can turn on or off for itself. Without, it gets `g.inherited` (plan.rs).
   const inherited = (field, title, help) => {
-    const appDefault = g.isApp && (field === 'bridge' || (field === 'layout' && own.bridge !== true));
-    let first = appDefault ? 'Off, as for apps' : `As for ${store.name} (${onOff(store.settings[field])})`;
-    if (g.isApp && field === 'layout' && own.bridge === true) first = 'On, with the bridge';
-    if (!g.isApp && field === 'fullScreen') first = 'Off, as for games';
+    const first = `Default (${onOff(g.inherited[field])})`;
     return settingRow(title, help,
       select(title, [['', first], ['on', 'On'], ['off', 'Off']], own[field] === null ? '' : onOff(own[field]),
         (v) => save({ [field]: v === '' ? null : v === 'on' })));
@@ -860,33 +886,28 @@ function behavior(g) {
   const rows = [];
   if (store.app) {
     const parts = appParts(store.app);
-    const storeChoice = APP_RUNNING.find(([v]) => v === store.settings.appRunning)[1].toLowerCase();
+    const inheritedChoice = APP_RUNNING.find(([v]) => v === g.inherited.appRunning)[1].toLowerCase();
     rows.push(settingRow(...parts.appRunning,
-      select('When the app is already running', [['', `As for ${store.name} (${storeChoice})`], ...APP_RUNNING], own.appRunning || '',
+      select('When the app is already running', [['', `Default (${inheritedChoice})`], ...APP_RUNNING], own.appRunning || '',
         (v) => save({ appRunning: v || null }))));
     rows.push(inherited('closeApp', ...parts.closeApp));
   }
-  if (store.needsBridge || store.app) {
-    rows.push(h('p.subhead', {}, store.needsBridge
-      ? (g.isApp ? 'Windows starts this app, so Steam can\'t see it. steambro stands in for Steam:' : 'Windows starts this game, so Steam can\'t see it. steambro stands in for Steam:')
-      : `When ${store.app} stays outside Steam, Steam can't see the game. Then steambro stands in for Steam:`));
-    for (const [field, title, help] of standInParts()) {
-      const appHelp = g.isApp && field === 'bridge'
-        ? "Off for apps: Steam's desktop layout gives them mouse and keyboard, which apps like Netflix understand. Turn it on only for an app that reads controllers."
-        : help;
-      rows.push(inherited(field, title, appHelp));
-    }
+  rows.push(h('p.subhead', {}, unseenLine(store, g.isApp ? 'app' : 'game')));
+  for (const [field, title, help] of standInParts()) {
+    const appHelp = g.isApp && field === 'bridge'
+      ? "Off for apps: Steam's desktop layout gives them mouse and keyboard, which apps like Netflix understand. Turn it on only for an app that reads controllers."
+      : help;
+    rows.push(inherited(field, title, appHelp));
   }
   rows.push(h('p.subhead', {}, 'Window:'));
   rows.push(inherited('fullScreen', 'Start in full screen', FULL_SCREEN_HELP));
-  const launch = settingsView.settings.launch;
   rows.push(h('p.subhead', {}, 'Waits for this game:'));
-  const startDefault = Math.max(launch.startTimeoutS, g.store === 'epic' ? 300 : 0);
+  const startDefault = g.inherited.startTimeoutS;
   rows.push(settingRow('Wait for the game to start', 'After its store started it. Some games update or show a launcher first.',
-    select('Wait for the game to start', [['', `As for all games (${seconds(startDefault)})`], ...timings(START_WAITS, own.startTimeoutS ?? startDefault, seconds)],
+    select('Wait for the game to start', [['', `Default (${seconds(startDefault)})`], ...timings(START_WAITS, own.startTimeoutS ?? startDefault, seconds)],
       own.startTimeoutS === null ? '' : String(own.startTimeoutS), (v) => save({ startTimeoutS: v === '' ? null : Number(v) }))));
   rows.push(settingRow('The game has ended after', 'No process of it for this long. A game that restarts itself, like after an update, needs longer.',
-    select('The game has ended after', [['', `As for all games (${seconds(launch.endGraceS)})`], ...timings(END_WAITS, own.endGraceS ?? launch.endGraceS, seconds)],
+    select('The game has ended after', [['', `Default (${seconds(g.inherited.endGraceS)})`], ...timings(END_WAITS, own.endGraceS ?? g.inherited.endGraceS, seconds)],
       own.endGraceS === null ? '' : String(own.endGraceS), (v) => save({ endGraceS: v === '' ? null : Number(v) }))));
   return h('div.section.compact', {},
     h('p', {}, "steambro's automatic parts for this game. Each follows its store's setting until you change it here."),
@@ -1334,8 +1355,8 @@ function showMood() {
   logo.classList.add('pop');
 }
 
-// The cloud in the corner, for fun: it squeezes its eyes while the mouse is over it, and glances
-// away while it is pressed. The tray icon keeps the app's mood.
+// The cloud at the top of the sidebar, for fun: it squeezes its eyes while the mouse is over it,
+// and glances away while it is pressed. The tray icon keeps the app's mood.
 function pokeLogo() {
   const logo = $('#logo');
   for (const face of ['wink', 'glance', 'squeeze']) new Image().src = `logo-${face}.svg`;
@@ -1416,23 +1437,15 @@ async function loadSettings() {
   if (mode === 'settings') renderSettings();
 }
 
-/** Steam Input's setting for a kind of controller: true on, false off, null Steam's default. */
-function steamSupport(kind) {
-  if (kind === 'steam') return true;
-  const input = settingsView.steamInput;
-  const value = input && input[kind === 'other' ? 'generic' : kind];
-  return value === null || value === undefined ? null : value !== '0';
-}
-
 /** A notice when a connected controller won't reach Xbox games. */
 function controllerNotice() {
   const s = settingsView;
-  if (!s || !s.stores.some((st) => st.needsBridge && st.games && st.settings.bridge)) return null;
-  const copied = s.connected.filter((kind) => kind !== 'xbox');
-  const off = copied.find((kind) => steamSupport(kind) === false);
+  if (!s || !s.stores.some((st) => st.unseen === 'always' && st.games && st.values.bridge)) return null;
+  const copied = s.controllers.filter((c) => c.connected && c.bridged);
+  const off = copied.find((c) => c.steamInput === false);
   let text = null;
-  if (copied.length && !s.driver.installed) text = `Your ${KINDS[copied[0]]} needs a driver to work in Xbox games.`;
-  else if (off) text = `Steam Input is off for ${KINDS[off]}s, so yours won't work in Xbox games.`;
+  if (copied.length && !s.driver.installed) text = `Your ${KINDS[copied[0].kind]} needs a driver to work in Xbox games.`;
+  else if (off) text = `Steam Input is off for ${KINDS[off.kind]}s, so yours won't work in Xbox games.`;
   if (!text) return null;
   return h('div.notice.action', {},
     h('span', {}, h('strong', {}, 'Controllers: '), text),
@@ -1461,18 +1474,17 @@ function driverCheck(d) {
 
 /** Each kind of controller connected now or used with Steam before, and whether it reaches Xbox games. */
 function controllerChecks(s) {
-  const kinds = [...new Set([...s.connected, ...s.seen])];
-  if (!kinds.length) return [{ state: 'idle', name: 'No controller found', text: 'Connect one to check it here.' }];
-  return kinds.map((kind) => {
-    const name = `${capitalize(KINDS[kind])}${s.connected.includes(kind) ? ', connected' : ', used with Steam before'}`;
-    if (kind === 'xbox') {
+  if (!s.controllers.length) return [{ state: 'idle', name: 'No controller found', text: 'Connect one to check it here.' }];
+  return s.controllers.map((c) => {
+    const name = `${capitalize(KINDS[c.kind])}${c.connected ? ', connected' : ', used with Steam before'}`;
+    if (!c.bridged) {
       return { state: 'ok', name, text: "The game reads it itself. steambro only keeps Steam's desktop layout from giving its input a second time." };
     }
-    if (steamSupport(kind) === false) {
+    if (c.steamInput === false) {
       return {
         state: 'warn',
         name,
-        text: `Steam Input is off for ${KINDS[kind]}s in Steam's settings, so Steam doesn't pass it on. Turning it on changes it for all Steam games.`,
+        text: `Steam Input is off for ${KINDS[c.kind]}s in Steam's settings, so Steam doesn't pass it on. Turning it on changes it for all Steam games.`,
         action: ["Open Steam's settings", () => invoke('open_steam_controller_settings').catch((e) => toast(String(e), 'error'))],
       };
     }
@@ -1580,7 +1592,7 @@ function openLink(what) {
   invoke('open_link', { what }).catch((error) => toast(`steambro couldn't open that: ${error}`, 'error'));
 }
 
-/** One store's behavior on the settings page. */
+/** One store's card on the settings page: its switches show its values; a change saves a choice. */
 function storeCard(st) {
   const save = async (change) => {
     try {
@@ -1593,24 +1605,20 @@ function storeCard(st) {
   const rows = [];
   if (st.app) {
     const parts = appParts(st.app);
-    rows.push(settingRow(...parts.appRunning, select('When the app is already running', APP_RUNNING, st.settings.appRunning, (v) => save({ appRunning: v }))));
-    rows.push(settingRow(...parts.closeApp, toggle(st.settings.closeApp, (on) => save({ closeApp: on }))));
+    rows.push(settingRow(...parts.appRunning, select('When the app is already running', APP_RUNNING, st.values.appRunning, (v) => save({ appRunning: v }))));
+    rows.push(settingRow(...parts.closeApp, toggle(st.values.closeApp, (on) => save({ closeApp: on }))));
   }
-  if (st.needsBridge || st.app) {
-    rows.push(h('p.subhead', {}, st.needsBridge
-      ? `Windows starts ${st.name} games, so Steam can't see them. steambro stands in for Steam:`
-      : `When ${st.app} stays outside Steam, Steam can't see the game. Then steambro stands in for Steam:`));
-    for (const [field, title, help] of standInParts()) {
-      rows.push(settingRow(title, help, toggle(st.settings[field], (on) => save({ [field]: on }))));
-    }
+  rows.push(h('p.subhead', {}, unseenLine(st, 'store')));
+  for (const [field, title, help] of standInParts()) {
+    rows.push(settingRow(title, help, toggle(st.values[field], (on) => save({ [field]: on }))));
   }
   if (st.apps) {
     rows.push(h('p.subhead', {}, `${st.apps === 1 ? 'The app' : `The ${st.apps} apps`} from the ${st.name} app, like Netflix:`));
-    rows.push(settingRow('Start in full screen', FULL_SCREEN_HELP, toggle(st.settings.fullScreen, (on) => save({ fullScreen: on }))));
+    rows.push(settingRow('Start in full screen', FULL_SCREEN_HELP, toggle(st.values.fullScreen, (on) => save({ fullScreen: on }))));
   }
   return h('div.store-card', {},
     h('div.store-head', {}, storeLogo(st.id), h('h3', {}, st.name), h('small', {}, st.games === 1 ? '1 game' : `${st.games} games`)),
-    rows.length ? rows : h('p.fine', {}, 'Steam starts and sees these games like its own; nothing to fix.'));
+    rows);
 }
 
 // ---------------------------------------------------------------- dialogs and toasts

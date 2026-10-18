@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{Game, Started, Store};
+use super::{Game, Started, Store, Unseen};
 use crate::art::{Origin, Slot};
 
 pub struct Exe;
@@ -50,6 +50,11 @@ impl Store for Exe {
         Ok(vec![(Slot::Icon, Origin::ExeIcon(game.details::<Added>().exe.clone()))])
     }
 
+    /// An exe that runs as administrator starts through Windows' prompt, outside Steam.
+    fn unseen(&self) -> Unseen {
+        Unseen::Admin
+    }
+
     fn launch_description(&self, game: &Game) -> String {
         let added = game.details::<Added>();
         format!("\"{}\" {}", added.exe.display(), added.args).trim_end().to_string()
@@ -63,7 +68,6 @@ impl Store for Exe {
             packages: Vec::new(),
             not_started: format!("{} didn't start", added.exe.display()),
             nudge: None,
-            start_timeout: None,
             outside_steam: elevated,
             after: None,
         })

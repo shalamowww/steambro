@@ -1,5 +1,12 @@
 //! The Xbox app and Game Pass: PC games installed as Windows packages, artwork from the Microsoft
-//! Store, started the way the Start menu starts them.
+//! Store, started the way the Start menu starts them. Also the Windows apps the user added to the
+//! Xbox app's library, like Netflix (added.rs).
+//!
+//! Windows' package broker creates every packaged process, so an Xbox game runs outside Steam's
+//! launch, whoever asks for it: Steam tracks only steambro, and its overlay and Steam Input layout
+//! don't reach the game. Other ways fail too: Steam has no permission to start the game's exe,
+//! `GameLaunchHelper.exe` started directly asks Windows to start the game again, and Windows
+//! refuses `CreateProcess` with the package's name. So steambro stands in for Steam (`Unseen`).
 
 mod activate;
 mod added;
@@ -10,7 +17,7 @@ use std::path::PathBuf;
 
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 
-use super::{Game, Started, Store, is_named};
+use super::{Game, Started, Store, Unseen, is_named};
 use crate::art::{Anchor, Origin, Slot};
 use crate::steam::Shortcut;
 
@@ -26,6 +33,13 @@ struct Package {
     /// The game's own executable, as declared in MicrosoftGame.config. `None` for an app the
     /// user added in the Xbox app, like Netflix.
     exe: Option<PathBuf>,
+}
+
+/// An Xbox game, or an app like Netflix, for other modules' tests.
+#[cfg(test)]
+pub fn test_game(name: &str, app: bool) -> Game {
+    let package = Package { family: format!("Test.{name}_test"), package_dir: PathBuf::new(), exe: (!app).then(|| PathBuf::from("Game.exe")) };
+    Game::new(&Xbox, name.into(), name.into(), PathBuf::new(), package)
 }
 
 impl Store for Xbox {
@@ -95,15 +109,14 @@ impl Store for Xbox {
                 format!("{} didn't start. Try starting it from the Start menu once.", game.name())
             },
             nudge: None,
-            start_timeout: None,
             outside_steam: false,
             after: None,
         })
     }
 
     /// Windows starts packaged games outside Steam's launch.
-    fn needs_bridge(&self) -> bool {
-        true
+    fn unseen(&self) -> Unseen {
+        Unseen::Always
     }
 
     /// An app added in the Xbox app, like Netflix, isn't a game.

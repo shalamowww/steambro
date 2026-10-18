@@ -1,5 +1,6 @@
 //! Every game steambro found on this PC, whichever store it came from. Each store is a module
-//! that implements `Store`; everything about one store lives in its module.
+//! that implements `Store`; everything about one store lives in its module. steambro reads each
+//! store's own records and never scans the disk, so a leftover game folder doesn't show.
 
 mod battlenet;
 mod epic;
@@ -12,7 +13,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use serde::Serialize;
+
 use crate::art::{Anchor, Origin, Slot};
+use crate::settings::Overrides;
 use crate::steam::Shortcut;
 
 /// Every store steambro supports. A new store is a module that implements `Store`, added here.
@@ -24,12 +28,12 @@ pub fn stores() -> &'static [&'static dyn Store] {
 
 /// One source of games: how to find its games, where their artwork comes from, and how they start.
 pub trait Store: Sync {
-    /// The first part of its game keys, e.g. `xbox`. Never changes: the state and Steam shortcuts
+    /// The first part of its game keys, like `xbox`. Never changes: the state and Steam shortcuts
     /// hold game keys.
     fn id(&self) -> &'static str;
-    /// The store's name for display, e.g. `Xbox`. Also the tag on its Steam shortcuts.
+    /// The store's name for display, like `Xbox`. Also the tag on its Steam shortcuts.
     fn name(&self) -> &'static str;
-    /// Where its artwork comes from, for display, e.g. `Microsoft Store`.
+    /// Where its artwork comes from, for display, like `Microsoft Store`.
     fn art_source(&self) -> &'static str;
     /// The games installed for the current Windows user, from the store's own records; never from
     /// scanning the disk. Empty when the store isn't installed. A game that can't be read is
@@ -56,13 +60,21 @@ pub trait Store: Sync {
     }
     /// Starts the game for `steambro launch` and says how to follow it. See launch.rs.
     fn start(&self, game: &Game) -> crate::Result<Started>;
-    /// Steam doesn't see the store's games when they run, so `steambro launch` runs the Steam Input
-    /// bridge (src/bridge.rs) while they play.
-    fn needs_bridge(&self) -> bool {
-        false
+    /// When Steam can't see the store's games while they play (plan.rs). Every store says it, so
+    /// that the launch and the settings page read the same answer.
+    fn unseen(&self) -> Unseen;
+    /// The store's own defaults, between steambro's and the user's choices for the store
+    /// (plan.rs).
+    fn defaults(&self) -> Overrides {
+        Overrides::default()
+    }
+    /// How long the store may take to start a game at least, when that's longer than the setting
+    /// for every game (`LaunchSettings::start_timeout_s`); a game's own setting still wins.
+    fn start_timeout(&self) -> Option<std::time::Duration> {
+        None
     }
     /// An app rather than a game, like Netflix. Steam's desktop layout (mouse and keyboard) suits
-    /// it, so the Steam Input bridge is off for it unless the game's setting turns it on.
+    /// it, so by default it gets no bridge, keeps that layout, and starts in full screen (plan.rs).
     fn is_app(&self, _game: &Game) -> bool {
         false
     }
@@ -89,6 +101,21 @@ pub trait Store: Sync {
     }
 }
 
+/// When Steam can't see a store's games while they play. Then steambro stands in for Steam with the
+/// game's controller layout, the bridge, and the overlay, as the settings say (plan.rs).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Unseen {
+    /// Always: Windows starts the game, as a packaged app (Xbox).
+    Always,
+    /// When the store's app already ran outside Steam's launch, so the game it starts does too
+    /// (Battle.net, Epic Games).
+    AppOutside,
+    /// When the game runs as administrator: it starts through Windows' prompt, outside Steam's
+    /// launch (GOG, added exes).
+    Admin,
+}
+
 /// How `steambro launch` follows a game that its store started.
 pub struct Started {
     /// The game is a process with its exe in one of these folders,
@@ -99,9 +126,6 @@ pub struct Started {
     pub not_started: String,
     /// Asks the store once more if no game process has appeared after a while.
     pub nudge: Option<Box<dyn Fn() -> crate::Result<()>>>,
-    /// How long the game may take to appear at least, when the store needs longer than the
-    /// setting for every game (`LaunchSettings::start_timeout_s`); a game's own setting still wins.
-    pub start_timeout: Option<std::time::Duration>,
     /// Steam doesn't see the game: the store's app already ran outside Steam's launch, or the game
     /// runs as administrator.
     pub outside_steam: bool,
@@ -177,6 +201,16 @@ impl Library {
     pub fn is_launched_by(&self, game: &Game, shortcut: &Shortcut) -> bool {
         is_inside(&shortcut.exe_path(), game.install_dir()) || game.store.is_launched_by(game, shortcut)
     }
+}
+
+/// A game of the store with this ID, for other modules' tests. Only Xbox has apps.
+#[cfg(test)]
+pub fn test_game(store_id: &str, name: &str, app: bool) -> Game {
+    if store_id == "xbox" {
+        return xbox::test_game(name, app);
+    }
+    let store = *STORES.iter().find(|s| s.id() == store_id).expect("a known store");
+    Game::new(store, name.into(), name.into(), PathBuf::new(), ())
 }
 
 /// The installed game with this key, asking only its store. For `steambro launch`, which needs one

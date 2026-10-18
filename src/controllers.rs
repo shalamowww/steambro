@@ -1,5 +1,6 @@
-//! Which kinds of game controllers are connected, for the settings window's checks on the Steam
-//! Input bridge.
+//! Game controllers: which kind a controller is, which kinds are connected, which the Steam Input
+//! bridge copies, and whether Steam Input is on for each kind. Every part of steambro that tells
+//! controllers apart asks this module.
 
 use serde::Serialize;
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
@@ -9,6 +10,7 @@ use windows::Win32::Devices::DeviceAndDriverInstallation::{
 };
 
 use crate::driver::property_strings as strings;
+use crate::steam::InputSettings;
 use windows::core::PCWSTR;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize)]
@@ -21,9 +23,72 @@ pub enum Kind {
     Other,
 }
 
+impl Kind {
+    /// The kind of a controller, from its USB vendor ID. Only for a device known to be a
+    /// controller: Microsoft and Sony also make keyboards, mice, and headsets.
+    pub fn of_vendor(vendor: u16) -> Self {
+        match vendor {
+            0x28DE => Self::Steam,
+            0x054C => Self::PlayStation,
+            0x057E => Self::Nintendo,
+            0x045E => Self::Xbox,
+            _ => Self::Other,
+        }
+    }
+
+    /// Whether the Steam Input bridge copies a controller of this kind for a game that Steam
+    /// doesn't see. Not an Xbox controller: a real one reaches the game through Windows, so a copy
+    /// would double it, and the bridge's own virtual controllers are Xbox 360 controllers, which
+    /// Steam lists too, so copying them would copy the copies.
+    pub fn bridged(self) -> bool {
+        self != Self::Xbox
+    }
+
+    /// Whether Steam Input is on for controllers of this kind in the account's settings. `None`
+    /// while the setting is Steam's default, which steambro can't tell. Steam always handles its
+    /// own controllers.
+    pub fn steam_input(self, settings: &InputSettings) -> Option<bool> {
+        let value = match self {
+            Self::Steam => return Some(true),
+            Self::Xbox => &settings.xbox,
+            Self::PlayStation => &settings.playstation,
+            Self::Nintendo => &settings.nintendo,
+            Self::Other => &settings.generic,
+        };
+        value.as_ref().map(|v| v != "0")
+    }
+}
+
+/// A kind of controller connected now or used with the account before, as the settings page checks
+/// it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Check {
+    pub kind: Kind,
+    pub connected: bool,
+    /// The bridge copies it for Xbox games (`Kind::bridged`).
+    pub bridged: bool,
+    /// Steam Input is on for it (`Kind::steam_input`).
+    pub steam_input: Option<bool>,
+}
+
+/// Each kind of controller connected now, and then each kind used with the account before, from
+/// its controller settings.
+pub fn checks(input: Option<&InputSettings>) -> Vec<Check> {
+    let connected = connected();
+    let seen = input.map(|i| seen_by_steam(&i.types_used)).unwrap_or_default();
+    let mut kinds: Vec<Kind> = connected.iter().chain(&seen).copied().collect();
+    kinds.sort_by_key(|kind| (!connected.contains(kind), *kind));
+    kinds.dedup();
+    kinds
+        .into_iter()
+        .map(|kind| Check { kind, connected: connected.contains(&kind), bridged: kind.bridged(), steam_input: input.and_then(|i| kind.steam_input(i)) })
+        .collect()
+}
+
 /// The kinds of controllers connected now. Virtual controllers on the ViGEm bus (the bridge's own)
 /// don't count.
-pub fn connected() -> Vec<Kind> {
+fn connected() -> Vec<Kind> {
     let virtual_parents = crate::driver::bus_instance_ids();
     let mut kinds = Vec::new();
     unsafe {
@@ -52,7 +117,7 @@ pub fn connected() -> Vec<Kind> {
 }
 
 /// The kinds of controllers Steam lists in `ControllerTypesUsed`, like `controller_xboxone`.
-pub fn seen_by_steam(types: &str) -> Vec<Kind> {
+fn seen_by_steam(types: &str) -> Vec<Kind> {
     let mut kinds: Vec<Kind> = types
         .split(',')
         .map(str::trim)
@@ -70,18 +135,16 @@ pub fn seen_by_steam(types: &str) -> Vec<Kind> {
     kinds
 }
 
+/// The device's kind, when it's a controller: a game device in HID's terms, any of Valve's
+/// devices, or a Microsoft device with an Xbox controller's device class or XInput HID ID (`IG_`,
+/// over Bluetooth).
 fn classify(vendor: u16, class: &str, game: bool, ids: &[String]) -> Option<Kind> {
-    match vendor {
-        0x28DE => Some(Kind::Steam),
-        0x054C if game => Some(Kind::PlayStation),
-        0x057E if game => Some(Kind::Nintendo),
-        // Microsoft also makes keyboards and mice; Xbox controllers have their own device classes,
-        // or XInput HID IDs (`IG_`) over Bluetooth.
-        0x045E if class.starts_with("xbox") || class.starts_with("xna") || ids.iter().any(|id| id.to_uppercase().contains("IG_")) => Some(Kind::Xbox),
-        0x045E => None,
-        _ if game => Some(Kind::Other),
-        _ => None,
-    }
+    let controller = match vendor {
+        0x28DE => true,
+        0x045E => class.starts_with("xbox") || class.starts_with("xna") || ids.iter().any(|id| id.to_uppercase().contains("IG_")),
+        _ => game,
+    };
+    controller.then(|| Kind::of_vendor(vendor))
 }
 
 /// The vendor ID in a hardware ID: `VID_045E` (USB) or `VID&02045E` (Bluetooth).
@@ -119,6 +182,34 @@ mod tests {
         assert_eq!(vendor_id(r"USB\VID_28DE&PID_1304&MI_00"), Some(0x28DE));
         assert_eq!(vendor_id(r"HID\{00001812-0000-1000-8000-00805f9b34fb}_VID&02045e_PID&0b13"), Some(0x045E));
         assert_eq!(vendor_id(r"ACPI\PNP0303"), None);
+    }
+
+    #[test]
+    fn devices_and_their_kinds() {
+        let none: [String; 0] = [];
+        assert_eq!(classify(0x28DE, "hidclass", false, &none), Some(Kind::Steam));
+        assert_eq!(classify(0x054C, "hidclass", true, &none), Some(Kind::PlayStation));
+        assert_eq!(classify(0x054C, "media", false, &none), None, "a Sony headset");
+        assert_eq!(classify(0x045E, "xboxcomposite", false, &none), Some(Kind::Xbox));
+        assert_eq!(classify(0x045E, "hidclass", false, &[r"HID\VID_045E&PID_0B13&IG_00".to_string()]), Some(Kind::Xbox));
+        assert_eq!(classify(0x045E, "keyboard", false, &none), None, "a Microsoft keyboard");
+        assert_eq!(classify(0x2DC8, "hidclass", true, &none), Some(Kind::Other));
+        assert_eq!(classify(0x046D, "mouse", false, &none), None);
+    }
+
+    #[test]
+    fn the_bridge_copies_all_but_xbox_controllers() {
+        let bridged: Vec<Kind> = [Kind::Xbox, Kind::Steam, Kind::PlayStation, Kind::Nintendo, Kind::Other].into_iter().filter(|k| k.bridged()).collect();
+        assert_eq!(bridged, [Kind::Steam, Kind::PlayStation, Kind::Nintendo, Kind::Other]);
+    }
+
+    #[test]
+    fn steam_input_by_kind() {
+        let settings = InputSettings { xbox: Some("0".into()), playstation: Some("1".into()), ..Default::default() };
+        assert_eq!(Kind::Xbox.steam_input(&settings), Some(false));
+        assert_eq!(Kind::PlayStation.steam_input(&settings), Some(true), "on in games without PlayStation support");
+        assert_eq!(Kind::Nintendo.steam_input(&settings), None);
+        assert_eq!(Kind::Steam.steam_input(&InputSettings::default()), Some(true));
     }
 
     #[test]

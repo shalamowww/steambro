@@ -8,6 +8,8 @@
 //! for example with the Steam button, the window shows over the game and takes the focus; when it
 //! closes, the window hides and the game gets the focus back. The overlay's notifications don't
 //! show, because the window stays hidden for them: a window over the game costs the game frames.
+//! Steam's screenshot key and FPS counter see this window, not the game, and a game in exclusive
+//! full screen loses the front to it.
 //!
 //! The Steam button opens nothing until Steam has prepared its overlay for the window, which it
 //! does once the window has had the focus while drawing. So the first time the game is in front,
@@ -53,7 +55,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{PCSTR, s, w};
 
 use crate::Worker;
-use crate::window::{GameWindows, key_input, monitor_rect, window_pid};
+use crate::window::{GameWindows, InFront, key_input, monitor_rect, window_pid};
 
 /// How long steambro waits for Steam to load its overlay into the launch.
 const OVERLAY_WAIT: Duration = Duration::from_secs(3);
@@ -249,8 +251,11 @@ fn run(game_windows: &Mutex<GameWindows>, key: Option<&Hotkey>, stop: &AtomicBoo
     let mut focus_from: Option<HWND> = None;
     let mut was_open = false;
     let mut prepared = false;
-    // The window in front when last asked, and whether it has the app ID of the game's package.
-    let mut front: (HWND, bool) = (HWND::default(), false);
+    let mut in_front = InFront::default();
+    // EXPERIMENT: the overlay's state on each change, to find why it sometimes opens unseen.
+    let mut front_window = HWND::default();
+    let mut front_name = String::new();
+    let mut last_state = String::new();
     // One frame now, so that the overlay is ready before anyone opens it.
     window.draw();
     while !stop.load(Ordering::Relaxed) {
@@ -269,10 +274,13 @@ fn run(game_windows: &Mutex<GameWindows>, key: Option<&Hotkey>, stop: &AtomicBoo
         }
         let game = game_windows.lock().unwrap().clone();
         let foreground = unsafe { GetForegroundWindow() };
-        if foreground != front.0 {
-            front = (foreground, foreground != window.hwnd && game.has_app_id(foreground));
+        let game_in_front = in_front.game(&game, foreground);
+        if foreground != front_window {
+            front_window = foreground;
+            front_name = crate::process::image_path(window_pid(foreground))
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| format!("{foreground:?}"));
         }
-        let game_in_front = front.1 || game.pids.contains(&window_pid(foreground));
         if !prepared && game_in_front && !window.shown {
             prepared = true;
             if window.prepare(&game, foreground) {
@@ -303,6 +311,21 @@ fn run(game_windows: &Mutex<GameWindows>, key: Option<&Hotkey>, stop: &AtomicBoo
         if open != was_open {
             crate::log!("overlay: {}", if open { "open" } else { "closed" });
             was_open = open;
+        }
+        let state = format!(
+            "open={open} needs_frame={} shown={} front={} game_in_front={game_in_front} focus_from={} passing={} key_held={hotkey_held}",
+            !window.shown && overlay.needs_frame(),
+            window.shown,
+            if foreground == window.hwnd { "steambro" } else { &front_name },
+            focus_from.is_some(),
+            passing.is_some(),
+        );
+        if state != last_state {
+            crate::log!("overlay: EXPERIMENT {state}");
+            last_state = state;
+        }
+        if hotkey && (open || passing.is_some()) {
+            crate::log!("overlay: EXPERIMENT the key came while open={open} passing={}; ignored", passing.is_some());
         }
         if hotkey
             && passing.is_none()

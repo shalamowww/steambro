@@ -7,7 +7,7 @@ mod launcher;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use super::{Game, Started, Store, is_named};
+use super::{Game, Started, Store, Unseen, is_named};
 use crate::art::{Origin, Slot};
 use crate::steam::Shortcut;
 
@@ -59,6 +59,15 @@ impl Store for Epic {
         Ok(())
     }
 
+    /// The Epic Games launcher started outside Steam starts its games outside Steam too.
+    fn unseen(&self) -> Unseen {
+        Unseen::AppOutside
+    }
+
+    fn start_timeout(&self) -> Option<Duration> {
+        Some(START_TIMEOUT)
+    }
+
     fn launch_description(&self, game: &Game) -> String {
         uri(game)
     }
@@ -90,7 +99,6 @@ impl Store for Epic {
             packages: Vec::new(),
             not_started: "the Epic Games launcher didn't start the game. It may need an update or a sign-in; have a look in the launcher.".into(),
             nudge: None,
-            start_timeout: Some(START_TIMEOUT),
             outside_steam: !opened,
             after: opened.then(|| {
                 Box::new(|| {

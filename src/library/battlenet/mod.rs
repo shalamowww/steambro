@@ -6,18 +6,18 @@ mod install;
 
 use std::path::PathBuf;
 
-use super::{Game, Started, Store, is_named};
+use super::{Game, Started, Store, Unseen, is_named};
 use crate::art::{Origin, Slot};
 use crate::steam::Shortcut;
 
 pub struct BattleNet;
 
 /// What the Battle.net module knows about a game beyond the common fields. The game's ID is its
-/// install ID from product.db, e.g. `s2` or `wow_classic_beta`.
+/// install ID from product.db, like `s2` or `wow_classic_beta`.
 struct Product {
     /// Battle.net.exe.
     client: PathBuf,
-    /// Launch code, e.g. `S2` or `WoWF`. Unknown when Battle.net hasn't cached its catalog.
+    /// Launch code, like `S2` or `WoWF`. Unknown when Battle.net hasn't cached its catalog.
     code: Option<String>,
     /// Official artwork in Battle.net's cache, by the Steam slot it fills.
     art: Vec<(Slot, PathBuf)>,
@@ -59,6 +59,11 @@ impl Store for BattleNet {
         Ok(())
     }
 
+    /// Battle.net started outside Steam starts its games outside Steam too.
+    fn unseen(&self) -> Unseen {
+        Unseen::AppOutside
+    }
+
     fn launch_description(&self, game: &Game) -> String {
         let product = game.details::<Product>();
         match &product.code {
@@ -77,7 +82,8 @@ impl Store for BattleNet {
 
     /// Makes sure the Battle.net app runs and has signed in, then sends the launch command. A
     /// Battle.net that steambro starts here runs inside Steam's launch, so Steam's overlay and
-    /// controller reach the game; steambro closes it again after the game.
+    /// controller reach the game. steambro closes it again after the game: Steam counts Battle.net
+    /// as part of the game and shows the game as running until Battle.net has closed.
     fn start(&self, game: &Game) -> crate::Result<Started> {
         let code = code(game)?;
         let client = game.details::<Product>().client.clone();
@@ -101,7 +107,6 @@ impl Store for BattleNet {
                 crate::log!("no game yet; asking Battle.net again");
                 client::command(&again.0, &format!("launch {}", again.1))
             })),
-            start_timeout: None,
             outside_steam: !opened,
             after: opened.then(|| {
                 Box::new(move || {

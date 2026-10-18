@@ -23,6 +23,7 @@ use windows::Win32::System::Threading::{CREATE_NO_WINDOW, OpenProcess, PROCESS_S
 use windows::Win32::UI::Input::XboxController::{XINPUT_STATE, XINPUT_VIBRATION, XInputGetState, XInputSetState};
 
 use crate::Worker;
+use crate::controllers::Kind;
 use crate::steam::Steam;
 
 /// How often `steambro launch` reads Steam's list of virtual controllers.
@@ -37,10 +38,10 @@ pub struct Bridge {
 }
 
 impl Bridge {
-    /// Starts the bridge when Steam launched steambro; `None` otherwise. Steam uses the game's
-    /// layout while it plays (the game's `layout` setting, which the launch checked). `copy` is
-    /// the game's `bridge` setting (`Settings::behavior`); without it, or without the driver, the
-    /// bridge only makes Steam use the game's layout (`watch`).
+    /// Starts the bridge when Steam launched steambro; `None` otherwise. The launch starts it only
+    /// with the game's `layout` setting on. `copy` is the game's `bridge` setting (plan.rs);
+    /// without it, or without the driver, the bridge only makes Steam use the game's layout
+    /// (`watch`).
     pub fn start(copy: bool) -> Option<Bridge> {
         let Some(app_id) = steam_app_id() else {
             crate::log!("bridge: not started by Steam, so no Steam Input bridge");
@@ -61,15 +62,16 @@ impl Bridge {
 
 /// Follows Steam's list of virtual controllers until `stop`. Steam is made to use the game's
 /// layout once it has a controller: without that, Steam's desktop layout would turn the
-/// controller into mouse and keyboard on top of the game. With `copy`, each controller that isn't
-/// an Xbox controller is copied; the game reads Xbox controllers itself.
+/// controller into mouse and keyboard on top of the game, and an Xbox controller, which the game
+/// reads itself, would give its input twice. With `copy`, each controller that `Kind::bridged`
+/// allows is copied.
 fn watch(app_id: u32, copy: bool, stop: &AtomicBool) {
     let mut forced = false;
     let mut helper: Option<Helper> = None;
     let mut copied: Option<Vec<Slot>> = None;
     while !stop.load(Ordering::Relaxed) {
         let slots = steam_slots();
-        let to_copy: Vec<Slot> = slots.iter().filter(|s| !s.microsoft).cloned().collect();
+        let to_copy: Vec<Slot> = slots.iter().filter(|s| s.kind.bridged()).cloned().collect();
         if !forced && !slots.is_empty() {
             force_layout(app_id);
             forced = true;
@@ -130,9 +132,9 @@ fn marker_path(pid: u32) -> crate::Result<PathBuf> {
     Ok(crate::data_dir()?.join("bridges").join(pid.to_string()))
 }
 
-/// For the tray app: gives Steam its layouts back for launches that ended without doing it, as
-/// when the user closes a game from Steam's menu and Steam ends `steambro launch`. When another
-/// launch still forces a layout, Steam gets that one again.
+/// For the tray app: gives Steam its layouts back for launches that ended without doing it. Steam's
+/// Exit game and Stop always end `steambro launch` that way, without a chance to clean up. When
+/// another launch still forces a layout, Steam gets that one again.
 pub fn release_orphans() {
     let Ok(dir) = crate::data_dir().map(|d| d.join("bridges")) else { return };
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
@@ -216,7 +218,7 @@ pub fn helper(parent: u32) -> i32 {
 /// can be read.
 fn copy_controllers(done: impl Fn() -> bool) -> crate::Result<()> {
     let client = Client::connect().map_err(|e| format!("ViGEmBus isn't available: {e:?}"))?;
-    let slots: Vec<Slot> = steam_slots().into_iter().filter(|s| !s.microsoft).collect();
+    let slots: Vec<Slot> = steam_slots().into_iter().filter(|s| s.kind.bridged()).collect();
     let mut pads: [Option<Xbox360Wired<&Client>>; 4] = [None, None, None, None];
     let mut last_packet = [u32::MAX; 4];
     while !done() {
@@ -260,7 +262,8 @@ fn copy_controllers(done: impl Fn() -> bool) -> crate::Result<()> {
 }
 
 /// Passes the rumble that the game asks of the virtual controller to Steam's controller in `slot`,
-/// on a thread that ends when the virtual controller is unplugged.
+/// on a thread that ends when the virtual controller is unplugged. Steam's hook takes it to the
+/// real controller; Steam's own rumble test on the virtual controller reaches it the same way.
 fn pass_rumble(pad: &mut Xbox360Wired<&Client>, slot: u32) {
     let notifications = match pad.request_notification() {
         Ok(notifications) => notifications,
@@ -296,10 +299,8 @@ struct Slot {
     name: String,
     vid: String,
     pid: String,
-    /// A Microsoft controller (vendor 0x045e). The bridge doesn't copy these: an Xbox 360
-    /// controller there is one of the bridge's own, which copying would loop, and a real Xbox
-    /// controller reaches the game natively, which copying would double.
-    microsoft: bool,
+    /// From the vendor ID; it tells whether the bridge copies the controller (`Kind::bridged`).
+    kind: Kind,
 }
 
 fn describe(slots: &[Slot]) -> String {
@@ -322,7 +323,7 @@ fn parse_slots(text: &str) -> Vec<Slot> {
     let mut slots: Vec<Slot> = Vec::new();
     for line in text.lines().map(str::trim) {
         if let Some(index) = line.strip_prefix("[slot ").and_then(|rest| rest.strip_suffix(']')).and_then(|n| n.parse().ok()) {
-            slots.push(Slot { index, name: String::new(), vid: String::new(), pid: String::new(), microsoft: false });
+            slots.push(Slot { index, name: String::new(), vid: String::new(), pid: String::new(), kind: Kind::Other });
         } else if let Some((key, value)) = line.split_once('=')
             && let Some(slot) = slots.last_mut()
         {
@@ -330,7 +331,7 @@ fn parse_slots(text: &str) -> Vec<Slot> {
                 "name" => slot.name = value.to_string(),
                 "VID" => {
                     slot.vid = value.to_lowercase();
-                    slot.microsoft = slot.vid == "0x045e";
+                    slot.kind = u16::from_str_radix(slot.vid.trim_start_matches("0x"), 16).map_or(Kind::Other, Kind::of_vendor);
                 }
                 "PID" => slot.pid = value.to_lowercase(),
                 _ => {}
@@ -346,14 +347,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn steam_slots_mark_microsoft_controllers() {
+    fn steam_slots_and_their_kinds() {
         let text = "[slot 0]\nname=Steam Controller\nVID=0x28de\nPID=0x1302\ntype=steam\n[slot 1]\nname=Xbox 360 Controller\nVID=0x045e\nPID=0x028e\n[slot 2]\nname=DualSense\nVID=0x054c\nPID=0x0ce6\n[slot 3]\nname=Xbox Wireless Controller\nVID=0x045E\nPID=0x0b13\n[slot 4]\nname=Fifth\nVID=0x054c\n";
         let slots = parse_slots(text);
-        let copied: Vec<u32> = slots.iter().filter(|s| !s.microsoft).map(|s| s.index).collect();
-        assert_eq!(copied, [0, 2]);
-        assert_eq!(slots.len(), 4);
+        let kinds: Vec<Kind> = slots.iter().map(|s| s.kind).collect();
+        assert_eq!(kinds, [Kind::Steam, Kind::Xbox, Kind::PlayStation, Kind::Xbox]);
         assert_eq!(slots[2].name, "DualSense");
-        assert!(slots[3].microsoft);
         assert!(parse_slots("").is_empty());
     }
 }

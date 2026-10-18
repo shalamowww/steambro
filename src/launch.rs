@@ -2,7 +2,7 @@
 //! to start it. Steam tracks steambro as the game, so steambro asks the game's store to start it
 //! and stays open until the game has ended. While Steam can't see the game, steambro stands in
 //! for Steam: its controllers and its overlay. When Steam ends the launch, the game ends with it.
-//! An app starts in full screen. Each part follows the settings.
+//! An app starts in full screen. Each part follows the game's plan (plan.rs).
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -11,30 +11,37 @@ use std::time::{Duration, Instant};
 use crate::bridge::{self, Bridge};
 use crate::library::{self, Game, Started, is_inside};
 use crate::overlay::{Hotkey, Overlay};
+use crate::plan::{self, Behavior};
 use crate::process::Job;
 use crate::prompt;
-use crate::settings::{AppRunning, Behavior, Settings};
+use crate::settings::{AppRunning, Settings};
 use crate::steam::Steam;
 use crate::window::{FullScreen, GameWindows};
 
+/// Starts the game with this key and waits until it has ended. An error means the game didn't
+/// start; main.rs shows it in a message box.
 pub fn run(game_key: &str) -> crate::Result<()> {
     crate::log!("starting {game_key}");
     let game = library::find_installed(game_key)?;
     let settings = Settings::load();
-    let is_app = game.store.is_app(&game);
+    let behavior = Behavior::of(&settings, &game);
     if let Some(app) = game.store.app_name()
         && game.store.app_running()
     {
-        restart_app(&game, app, &settings);
+        restart_app(&game, app, &behavior, &settings);
     }
-    let mut job = exit_job(&settings.behavior(game_key, is_app, None));
+    let mut job = exit_job(&behavior);
     let started = game.store.start(&game)?;
-    let behavior = settings.behavior(game_key, is_app, started.start_timeout);
     // The game's processes as last seen, and its packages; they tell which windows are the game's.
     let windows = Arc::new(Mutex::new(GameWindows::new(started.packages.clone())));
-    let unseen = game.store.needs_bridge() || started.outside_steam;
-    let stand_in = if unseen { StandIn::start(&behavior, &windows) } else { StandIn::default() };
-    let full_screen = behavior.full_screen.then(|| FullScreen::start(windows.clone(), behavior.start_timeout));
+    let stand_in = match plan::stand_in(game.store.unseen(), started.outside_steam) {
+        Some(reason) => {
+            crate::log!("steambro stands in for Steam: {reason}");
+            StandIn::start(&behavior, &windows)
+        }
+        None => StandIn::default(),
+    };
+    let full_screen = behavior.knobs.full_screen.then(|| FullScreen::start(windows.clone(), behavior.start_timeout));
     crate::log!("waiting for a process in {}", started.folders[0].display());
     let ended = wait_for_game(&started, &behavior, &windows, job.as_mut());
     drop(full_screen);
@@ -44,7 +51,7 @@ pub fn run(game_key: &str) -> crate::Result<()> {
     drop(job);
     ended?;
     if let Some(after) = started.after {
-        if behavior.close_app {
+        if behavior.knobs.close_app {
             after();
         } else {
             crate::log!("leaving the store's app open, as the settings say");
@@ -57,7 +64,7 @@ pub fn run(game_key: &str) -> crate::Result<()> {
 /// StarCraft II kept running when Steam ended Battle.net and the launch. And it sees no game that
 /// Windows starts, like an Xbox game. So the launch's job ends the game with the launch.
 fn exit_job(behavior: &Behavior) -> Option<Job> {
-    if !behavior.exit_ends_game {
+    if !behavior.knobs.exit_ends_game {
         crate::log!("the game keeps running if Steam ends steambro, as the settings say");
         return None;
     }
@@ -73,18 +80,18 @@ struct StandIn {
 
 impl StandIn {
     fn start(behavior: &Behavior, windows: &Arc<Mutex<GameWindows>>) -> Self {
-        let bridge = if behavior.layout {
-            Bridge::start(behavior.bridge)
+        let bridge = if behavior.knobs.layout {
+            Bridge::start(behavior.knobs.bridge)
         } else {
             crate::log!("Steam keeps its desktop layout during the game, as the settings say");
             None
         };
-        let overlay = if !behavior.overlay {
+        let overlay = if !behavior.knobs.overlay {
             crate::log!("no Steam overlay over the game, as the settings say");
             None
         } else {
             match steam_overlay() {
-                Ok(key) => Some(Overlay::start(windows.clone(), if behavior.overlay_keys { key } else { None })),
+                Ok(key) => Some(Overlay::start(windows.clone(), if behavior.knobs.overlay_keys { key } else { None })),
                 Err(reason) => {
                     crate::log!("no Steam overlay over the game: {reason}");
                     None
@@ -113,12 +120,12 @@ fn steam_overlay() -> Result<Option<Hotkey>, String> {
 /// The store's app already runs outside Steam's launch, so Steam wouldn't see the game it starts.
 /// As the settings say, or the user answers, steambro closes the app, so that the store's `start`
 /// opens it again inside Steam's launch. An app that is busy, like with a download, stays.
-fn restart_app(game: &Game, app: &str, settings: &Settings) {
+fn restart_app(game: &Game, app: &str, behavior: &Behavior, settings: &Settings) {
     if let Some(reason) = game.store.app_busy() {
         crate::log!("{app} runs outside Steam, but {reason}, so it stays");
         return;
     }
-    let restart = match settings.behavior(&game.key(), game.store.is_app(game), None).app_running {
+    let restart = match behavior.knobs.app_running {
         AppRunning::Restart => true,
         AppRunning::Leave => false,
         AppRunning::Ask => {

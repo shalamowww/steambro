@@ -1,5 +1,5 @@
-//! The windows of a game during its launch: which windows are the game's, and showing an app in
-//! full screen.
+//! The windows of a game during its launch: which windows are the game's, whether one of them is
+//! in front, and showing an app in full screen.
 //!
 //! A window is the game's when one of the game's processes owns it, or when it carries the app ID
 //! of one of the game's packages. A web app from the Xbox app, like Netflix, needs the second: its
@@ -88,6 +88,25 @@ impl GameWindows {
         let mut search = Search { game: self, best: None };
         let _ = unsafe { EnumWindows(Some(visit), LPARAM(&raw mut search as isize)) };
         search.best.map(|(hwnd, _)| hwnd)
+    }
+}
+
+/// Whether a window of the game is in front. It reads the window's app ID, a COM call, only when
+/// another window comes to the front, so a loop can ask it many times a second, as the overlay
+/// does.
+#[derive(Default)]
+pub struct InFront {
+    window: HWND,
+    has_app_id: bool,
+}
+
+impl InFront {
+    /// The calling thread must have COM (`GameWindows::has_app_id`).
+    pub fn game(&mut self, game: &GameWindows, foreground: HWND) -> bool {
+        if foreground != self.window {
+            *self = Self { window: foreground, has_app_id: game.has_app_id(foreground) };
+        }
+        !foreground.is_invalid() && (self.has_app_id || game.pids.contains(&window_pid(foreground)))
     }
 }
 

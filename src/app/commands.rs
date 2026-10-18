@@ -9,12 +9,14 @@ use windows::Win32::Foundation::HWND;
 use super::Shared;
 use super::tray::Mood;
 use crate::art::{Anchor, Crop, Slot};
-use crate::controllers::{self, Kind};
-use crate::library::Game;
-use crate::settings::{self, GameSettings, LaunchSettings, Settings, StoreSettings};
+use crate::controllers;
+use crate::library::{Game, Unseen};
+use crate::plan::{self, Inherited};
+use crate::settings::{self, Knobs, LaunchSettings, Overrides, Settings};
 use crate::steam::{Steam, SteamUser};
 use crate::sync::{self, Placement, Request, Status, Step};
 
+/// The library as the window shows it, for the current account.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct View {
@@ -73,8 +75,10 @@ struct GameView {
     store: &'static str,
     /// An app rather than a game, like Netflix: the bridge is off unless its own setting says on.
     is_app: bool,
-    /// This game's overrides of its store's behavior.
-    game_settings: GameSettings,
+    /// The user's choices for this game.
+    game_settings: Overrides,
+    /// What the game gets where it has no choice of its own (plan.rs).
+    inherited: Inherited,
     /// Steam Input is turned off in the game's properties in Steam.
     steam_input_off: bool,
     /// Steam's overlay is turned off in the game's properties in Steam.
@@ -97,6 +101,8 @@ struct SlotView {
     in_steam: bool,
 }
 
+/// Every game and its place in the current account. With `refresh`, the stores are asked again;
+/// without, the library detected last is used.
 #[tauri::command]
 pub async fn library(app: AppHandle, refresh: bool) -> Result<View, String> {
     blocking(app, "read the library", move |shared| {
@@ -163,6 +169,7 @@ pub async fn library(app: AppHandle, refresh: bool) -> Result<View, String> {
                     store: game.store.id(),
                     is_app: game.store.is_app(game),
                     game_settings: settings.game(&key),
+                    inherited: plan::inherited(&settings, game),
                     steam_input_off: app_id.is_some_and(|id| input_off.contains(&id)),
                     steam_overlay_off: app_id.is_some_and(|id| shortcuts.iter().any(|s| s.app_id == id && !s.allow_overlay)),
                     key,
@@ -275,18 +282,20 @@ struct GameProgress<'a> {
     step: &'a Step,
 }
 
+/// Sets the slot's crop, or clears it (`None`) so that the default crop applies.
 #[tauri::command]
 pub async fn set_crop(app: AppHandle, key: String, slot: Slot, crop: Option<Crop>) -> Result<(), String> {
     edit(app, move |shared, library, state, users| sync::set_crop(library, &shared.cache, state, users, &key, slot, crop)).await
 }
 
+/// Makes the store's image the slot's source again, with the default crop.
 #[tauri::command]
 pub async fn reset_art(app: AppHandle, key: String, slot: Slot) -> Result<(), String> {
     edit(app, move |shared, library, state, users| sync::reset(library, &shared.cache, state, users, &key, slot)).await
 }
 
-/// The image file arrives as the raw request body; the game and slot as `x-game` (URL-encoded)
-/// and `x-slot` headers.
+/// Makes an image file the slot's source. The file is the raw request body; the `x-game`
+/// (URL-encoded) and `x-slot` headers name the game and the slot.
 #[tauri::command]
 pub async fn replace_art(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("no image in the request".into()) };
@@ -372,12 +381,8 @@ pub async fn open_folder(app: AppHandle, key: String) -> Result<(), String> {
 pub struct SettingsView {
     settings: Settings,
     driver: DriverView,
-    /// Steam's controller settings in the current account; `None` without Steam or an account.
-    steam_input: Option<SteamInputView>,
-    /// The kinds of controllers connected now (`controllers::connected`).
-    connected: Vec<Kind>,
-    /// The kinds Steam has seen with the current account (`ControllerTypesUsed`).
-    seen: Vec<Kind>,
+    /// Each kind of controller connected now or used with the current account before.
+    controllers: Vec<controllers::Check>,
     /// Some installed games need the bridge.
     bridge_games: bool,
     /// Every store, with what can be set for it.
@@ -403,13 +408,16 @@ struct StoreView {
     name: &'static str,
     /// The store's own app that starts its games, like `Battle.net`.
     app: Option<&'static str>,
-    /// Steam never sees the store's games, so the bridge always matters (Xbox).
-    needs_bridge: bool,
+    /// When Steam can't see the store's games, so that steambro stands in for Steam.
+    unseen: Unseen,
     /// How many of its games are installed.
     games: usize,
     /// How many of those are apps, like Netflix.
     apps: usize,
-    settings: StoreSettings,
+    /// The user's choices for the store.
+    settings: Overrides,
+    /// What its settings card shows: those choices over the defaults (plan.rs).
+    values: Knobs,
 }
 
 #[derive(Serialize)]
@@ -419,16 +427,6 @@ struct DriverView {
     version: Option<String>,
     /// The bridge can reach the driver now.
     available: bool,
-}
-
-/// Each value: `None` for Steam's default, `"0"` off, else on (see `steam::InputSettings`).
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SteamInputView {
-    xbox: Option<String>,
-    playstation: Option<String>,
-    nintendo: Option<String>,
-    generic: Option<String>,
 }
 
 /// What the settings window shows: the settings and the checks on the Steam Input bridge.
@@ -452,20 +450,19 @@ pub async fn settings_view(app: AppHandle) -> Result<SettingsView, String> {
                 version: driver.version,
                 available: driver.available,
             },
-            seen: input.as_ref().map(|i| controllers::seen_by_steam(&i.types_used)).unwrap_or_default(),
-            steam_input: input.map(|i| SteamInputView { xbox: i.xbox, playstation: i.playstation, nintendo: i.nintendo, generic: i.generic }),
-            connected: controllers::connected(),
-            bridge_games: library.games.iter().any(|g| g.store.needs_bridge()),
+            controllers: controllers::checks(input.as_ref()),
+            bridge_games: library.games.iter().any(|g| g.store.unseen() == Unseen::Always),
             stores: crate::library::stores()
                 .iter()
                 .map(|store| StoreView {
                     id: store.id(),
                     name: store.name(),
                     app: store.app_name(),
-                    needs_bridge: store.needs_bridge(),
+                    unseen: store.unseen(),
                     games: library.games.iter().filter(|g| g.store.id() == store.id()).count(),
                     apps: library.games.iter().filter(|g| g.store.id() == store.id() && g.store.is_app(g)).count(),
                     settings: settings.store(store.id()),
+                    values: plan::store_values(&settings, *store),
                 })
                 .collect(),
             settings,
@@ -474,21 +471,19 @@ pub async fn settings_view(app: AppHandle) -> Result<SettingsView, String> {
     .await
 }
 
-/// Saves one store's behavior.
+/// Saves the user's choices for one store.
 #[tauri::command]
-pub async fn save_store_settings(app: AppHandle, store: String, settings: StoreSettings) -> Result<(), String> {
+pub async fn save_store_settings(app: AppHandle, store: String, settings: Overrides) -> Result<(), String> {
     blocking(app, "save the settings", move |_| {
         crate::log!("settings for {store}: {settings:?}");
-        Settings::update(|all| {
-            all.stores.insert(store, settings);
-        })
+        Settings::update(|all| all.set_store(&store, settings))
     })
     .await
 }
 
-/// Saves one game's overrides of its store's behavior.
+/// Saves the user's choices for one game.
 #[tauri::command]
-pub async fn set_game_settings(app: AppHandle, key: String, settings: GameSettings) -> Result<(), String> {
+pub async fn set_game_settings(app: AppHandle, key: String, settings: Overrides) -> Result<(), String> {
     blocking(app, "save the settings", move |_| {
         crate::log!("settings for {key}: {settings:?}");
         Settings::update(|all| all.set_game(&key, settings))
@@ -553,8 +548,8 @@ pub async fn answer_prompt(app: AppHandle, id: String, restart: bool, always: bo
         if always {
             Settings::update(|all| {
                 let mut store = all.store(&request.store);
-                store.app_running = if restart { settings::AppRunning::Restart } else { settings::AppRunning::Leave };
-                all.stores.insert(request.store.clone(), store);
+                store.app_running = Some(if restart { settings::AppRunning::Restart } else { settings::AppRunning::Leave });
+                all.set_store(&request.store, store);
             })?;
         }
         crate::prompt::answer(&id, &crate::prompt::Answer { restart, always })
