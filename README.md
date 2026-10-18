@@ -11,7 +11,7 @@ Real artwork, playtime, Steam's overlay, and Steam Input. Xbox games too.</p>
   <a href="#how-it-works">How it works</a>
 </p>
 
-![Steam's Big Picture mode with StarCraft II from Battle.net, Minecraft from Game Pass, Alien Nations from GOG, and Netflix from the Xbox app: each with its artwork, a Play button, and its playtime](media/bigpicture.webp)
+![The Non-Steam tab of Steam's Big Picture library: Alien Nations from GOG, ASTRONEER and Minecraft from Game Pass, Netflix from the Xbox app, StarCraft II and Warcraft from Battle.net, each with its cover art](media/bigpicture-tiles.webp)
 
 **steambro** finds the games your other stores installed and adds them to Steam. You press Play in Steam, and the game starts the way its store starts it. Steam counts the playtime. Big Picture gets one library.
 
