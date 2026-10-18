@@ -1,4 +1,5 @@
-//! Steam's KeyValues formats: the binary one in shortcuts.vdf, and the text one in loginusers.vdf.
+//! Steam's KeyValues formats: the binary one in shortcuts.vdf, and the text one in loginusers.vdf
+//! and localconfig.vdf.
 //!
 //! Binary: every entry is a type byte, a NUL-terminated key, then the value. A map ends with 0x08.
 

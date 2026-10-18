@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::art::Slot;
 
 pub struct InstalledGame {
-    /// Epic's app name, e.g. `Fortnite`, or a hex ID for most games. Stable across reinstalls.
+    /// Epic's app name, like `Fortnite`, or a hex ID for most games. Stable across reinstalls.
     pub app_name: String,
     pub name: String,
     pub install_dir: PathBuf,

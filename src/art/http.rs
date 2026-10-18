@@ -5,7 +5,8 @@ use windows::Storage::Streams::DataReader;
 use windows::Web::Http::HttpClient;
 use windows::core::HSTRING;
 
-/// Blocks until the whole body has arrived. Fails on a connection error or a non-2xx status.
+/// Blocks until the whole body has arrived; there is no timeout of its own. Fails on a connection
+/// error or a non-2xx status.
 pub fn get(url: &str) -> crate::Result<Vec<u8>> {
     let client = HttpClient::new()?;
     let response = client.GetAsync(&Uri::CreateUri(&HSTRING::from(url))?)?.join()?;

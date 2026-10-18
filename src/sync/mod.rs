@@ -367,7 +367,8 @@ fn source_with(cache: &Cache, game: &Game, slot: Slot, origins: &mut dyn FnMut()
 }
 
 /// Fills each slot of a steambro shortcut that has no final placement yet. A slot where Steam
-/// already has an image is kept as it is, for good. `fetch` gives the slot's source image.
+/// already has an image is kept as it is, and steambro never replaces it by itself. `fetch` gives
+/// the slot's source image.
 fn fill_art(cache: &Cache, state: &mut State, user: &SteamUser, game: &Game, fetch: &mut dyn FnMut(Slot) -> crate::Result<Option<Vec<u8>>>) {
     let key = game.key();
     let Some(app_id) = state.find(user.id, &key).map(|t| t.app_id) else { return };
@@ -490,6 +491,7 @@ fn shortcut_for(game: &Game, steambro: &Path) -> crate::Result<NewShortcut> {
         exe: steambro.to_path_buf(),
         launch_options: format!("launch \"{}\"", game.key()),
         icon: PathBuf::new(),
+        // Steam doesn't make a collection of a tag; the tag only names the store.
         tags: vec![game.source().to_string()],
     })
 }

@@ -44,6 +44,7 @@ pub fn write(message: impl Display) {
     let _ = append(&line);
 }
 
+/// The log file. The tray menu opens it.
 pub fn path() -> crate::Result<PathBuf> {
     Ok(crate::data_dir()?.join("steambro.log"))
 }

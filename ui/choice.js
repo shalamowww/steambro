@@ -1,7 +1,7 @@
 'use strict';
 
-// steambro's choice dialog, shared by the main window (app.js) and the launcher prompt
-// (prompt.js). Cancel is always on the left, the cloud sits between the buttons: it winks while
+// steambro's choice dialog, shared by the main window (app.js) and the question window of a game
+// launch (prompt.js). Cancel is always on the left, the cloud sits between the buttons: it winks while
 // nothing is picked, glances at Cancel (its eyes look left), and squeezes its eyes for the
 // confirming button. Mouse, keyboard, and controller work: A picks the highlighted button (or
 // confirms), B cancels, left and right move between the buttons, up and down move between the

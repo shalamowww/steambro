@@ -24,7 +24,7 @@ pub struct State {
 #[derive(Serialize, Deserialize)]
 pub struct TrackedShortcut {
     pub steam_user: u32,
-    /// The game's key, e.g. `xbox:<AUMID>` or `battlenet:s2`.
+    /// The game's key, like `xbox:<AUMID>` or `battlenet:s2`.
     pub game: String,
     /// Steam's ID for the shortcut. It stays the same when the user renames it in Steam.
     pub app_id: u32,

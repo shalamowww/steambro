@@ -5,6 +5,8 @@
 # Both hold steambro.exe, WebView2Loader.dll, and LICENSE.txt (GPL-3.0).
 # Needs the mingw-w64 cross toolchain (sudo apt install mingw-w64); the installer needs NSIS
 # (sudo apt install nsis), or MAKENSIS and NSISDIR pointing at an unpacked copy.
+# Run it in a clean export of a commit (git archive <commit> | tar -x -C <folder>): the exe holds
+# the ui folder as it is, so files that git doesn't track would go into it.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"

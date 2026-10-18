@@ -43,9 +43,10 @@ pub fn launch(exe: &PathBuf, uri: &str) -> crate::Result<()> {
 }
 
 /// Ends the launcher and waits until its helpers have ended too. The launcher has no quit command,
-/// and it only hides in the tray on a close message or Windows' sign-out messages (tested
-/// 2026-10-16), so its process is ended, as Task Manager does. It is left open while it installs
-/// or updates something (`busy`). The error says why it is still open.
+/// and a close message or Windows' sign-out messages only hide it in the tray, so steambro ends its
+/// process, as Task Manager does; the launcher continues an interrupted download at its next start.
+/// It stays open while it installs or updates something (`busy`). The error says why it is still
+/// open.
 pub fn close(data: &Path) -> crate::Result<()> {
     if let Some(reason) = busy(data) {
         return Err(reason.into());

@@ -108,7 +108,7 @@ pub fn installed_apps(added: &[super::added::AddedApp]) -> crate::Result<Vec<Xbo
 }
 
 /// Games installed through the Xbox app sit in a folder like `C:\XboxGames\<game>\Content`, and
-/// Windows' own package folder is just a link to it. Follow the link so paths match what users see.
+/// Windows' own package folder is a link to it. The real folder is the path that users see.
 fn real_path(path: PathBuf) -> PathBuf {
     let Ok(resolved) = std::fs::canonicalize(&path) else { return path };
     // canonicalize returns `\\?\C:\...`; drop that prefix for plain drive paths.

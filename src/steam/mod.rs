@@ -1,5 +1,7 @@
 //! Steam's own files and process: where Steam is installed, which accounts use it, their non-Steam
-//! shortcuts and artwork folder, and closing and starting Steam.
+//! shortcuts, collections, settings, and artwork folder, and closing and starting Steam. It reads
+//! and writes; sync decides what to change. Steam keeps shortcuts and collections in memory and
+//! writes them back when it exits, so steambro changes those files only while Steam is closed.
 
 mod vdf;
 
@@ -126,7 +128,8 @@ impl SteamUser {
             .collect())
     }
 
-    /// The account's controller settings, from `config\localconfig.vdf`.
+    /// The account's controller settings, from `config\localconfig.vdf`. The file also holds login
+    /// tokens, so steambro reads only the keys it needs and logs nothing from it.
     pub fn input_settings(&self) -> crate::Result<InputSettings> {
         InputSettings::parse(&std::fs::read_to_string(self.local_config())?)
     }
@@ -200,10 +203,10 @@ impl SteamUser {
     /// Takes the app IDs out of every collection's removed list, and out of Hidden, so a game added
     /// again shows up where it did before. Steam keeps a shortcut's place in its collections after
     /// the shortcut is gone: a dynamic collection, like one of the installed games, lists it as
-    /// removed, which keeps it out for good. Each changed collection gets the time as its timestamp
-    /// and version, as Steam ROM Manager does, so Steam keeps the local copy over its cloud's. A
-    /// backup copy goes to `<file>.steambro-backup` first. Steam must be closed. Returns the names
-    /// of the collections changed.
+    /// removed, which keeps it out when it is added again. Each changed collection gets the time as
+    /// its timestamp and version, as Steam ROM Manager does, so Steam keeps the local copy over its
+    /// cloud's. A backup copy goes to `<file>.steambro-backup` first. Steam must be closed. Returns
+    /// the names of the collections changed.
     pub fn restore_in_collections(&self, app_ids: &[u32]) -> crate::Result<Vec<String>> {
         let path = self.collections_path();
         if app_ids.is_empty() || !path.exists() {
@@ -212,6 +215,9 @@ impl SteamUser {
         if !cfg!(test) && Steam::is_running() {
             return Err("Steam is running; it has to be closed while steambro changes its collections".into());
         }
+        // A list of `[key, record]` pairs. A collection is a `user-collections.<id>` record whose
+        // `value` is the collection as JSON text: `name`, `added`, `removed`, and `filterSpec` for a
+        // dynamic one. The fields keep their order (`serde_json` with `preserve_order`).
         let mut entries: Vec<serde_json::Value> = serde_json::from_slice(&std::fs::read(&path)?)?;
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
         let listed = |id: &serde_json::Value| id.as_u64().is_some_and(|id| app_ids.iter().any(|a| u64::from(*a) == id));
@@ -393,9 +399,10 @@ pub struct NewShortcut {
 }
 
 impl NewShortcut {
-    /// The ID steambro gives the shortcut; Steam uses a stored ID as it is. It's derived from the
-    /// exe and name the way older Steam versions did it (and tools like Steam ROM Manager still
-    /// do), so the same game gets the same ID, and the same artwork file names, every time.
+    /// The ID steambro gives the shortcut: `crc32(quoted exe + name) | 0x80000000`, as older Steam
+    /// versions made it and Steam ROM Manager does. So the same game gets the same ID, artwork file
+    /// names, and playtime each time it is added. Current Steam gives a shortcut made in its own UI
+    /// a random ID, but it uses a stored ID as it is.
     pub fn app_id(&self) -> u32 {
         crc32(format!("{}{}", quoted(&self.exe), self.name).as_bytes()) | 0x8000_0000
     }

@@ -62,6 +62,7 @@ pub fn request(id: &str) -> crate::Result<Request> {
     Ok(serde_json::from_slice(&std::fs::read(paths(id)?.0).map_err(|_| "the game launch stopped waiting for an answer")?)?)
 }
 
+/// Writes the answer that the launch with this question ID waits for.
 pub fn answer(id: &str, answer: &Answer) -> crate::Result<()> {
     std::fs::write(paths(id)?.1, serde_json::to_vec(answer)?)?;
     Ok(())

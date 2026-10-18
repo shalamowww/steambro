@@ -1,5 +1,7 @@
 //! The ViGEmBus driver that the Steam Input bridge needs: whether it's installed and answers.
-//! steambro doesn't install it; the settings link its official installer (steambro.app/driver).
+//! steambro doesn't install it. The settings link its official installer (steambro.app/driver), the
+//! same way for every kind of install. Its author retired it in 2023; it gets no updates but keeps
+//! working.
 
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
     CM_Get_Device_IDW, CR_SUCCESS, DIGCF_PRESENT, GUID_DEVCLASS_SYSTEM, HDEVINFO, SETUP_DI_REGISTRY_PROPERTY, SP_DEVINFO_DATA, SPDRP_DRIVER, SPDRP_HARDWAREID,
@@ -19,6 +21,7 @@ pub struct Status {
     pub available: bool,
 }
 
+/// The driver's state now. Never fails: a driver that can't be read counts as not installed.
 pub fn status() -> Status {
     let devices = devices().unwrap_or_default();
     let version = devices.iter().find_map(|d| d.version.clone());
@@ -60,6 +63,7 @@ pub fn bus_instance_ids() -> Vec<String> {
     devices().unwrap_or_default().into_iter().map(|d| d.instance_id).filter(|id| !id.is_empty()).collect()
 }
 
+/// A device's instance ID, like `ROOT\SYSTEM\0001`. `None` when Windows doesn't give it.
 pub fn instance_id(devinst: u32) -> Option<String> {
     let mut buffer = [0u16; 512];
     if unsafe { CM_Get_Device_IDW(devinst, &mut buffer, 0) } != CR_SUCCESS {

@@ -6,6 +6,7 @@ use crate::library::{Game, Library};
 use crate::steam::{Shortcut, Steam};
 use crate::sync::{self, Placement, State, Status};
 
+/// Prints every game, its store, its place in each account, and its artwork. Changes nothing.
 pub fn list(verbose: bool) -> Result<()> {
     let library = Library::detect();
     for warning in &library.warnings {

@@ -56,7 +56,7 @@ Section "steambro"
 SectionEnd
 
 ; Leaves %LOCALAPPDATA%\steambro (the state, the settings, the art cache, the log), Steam's
-; shortcuts, and a driver steambro installed (the settings page removes it).
+; shortcuts, and the ViGEmBus driver, which has its own uninstaller.
 Section "Uninstall"
   nsExec::Exec 'taskkill /IM steambro.exe /F'
   Sleep 500

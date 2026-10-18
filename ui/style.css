@@ -1,3 +1,5 @@
+/* steambro's look, for the main window and a game launch's question window. Colors and shared
+   sizes are variables on :root. */
 :root {
   --bg: #0e1117;
   --surface: #161a23;
@@ -334,7 +336,7 @@ body.maximized .wc .restore { display: block; }
 .slot-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
 .slot-actions button { padding: 5px 10px; font-size: 12.5px; }
 
-/* Settings page and the game page's controller section */
+/* The settings page and a game's Settings tab */
 .settings .section { max-width: 780px; }
 .settings-head { padding: 24px 170px 0 32px; }
 .settings-head h1 { margin: 0; font-size: 24px; }

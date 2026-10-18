@@ -17,10 +17,10 @@ pub struct Installed {
 }
 
 pub struct InstalledGame {
-    /// Install ID from product.db, e.g. `s2` or `wow_classic_beta`.
+    /// Install ID from product.db, like `s2` or `wow_classic_beta`.
     pub uid: String,
     pub name: String,
-    /// Launch code, e.g. `S2` or `WoWF`. Unknown when Battle.net hasn't cached its catalog.
+    /// Launch code, like `S2` or `WoWF`. Unknown when Battle.net hasn't cached its catalog.
     pub product_id: Option<String>,
     pub install_dir: PathBuf,
     /// Official artwork found in Battle.net's cache, by the Steam slot it fills.
@@ -35,7 +35,7 @@ pub fn find() -> crate::Result<Option<Installed>> {
         return Ok(None);
     }
     let installs = read_product_db(&std::fs::read(&db_path)?)?;
-    // Without the cache we still know what's installed, just not the nice names or launch codes.
+    // Without the cache, the games still show, with their folder names and without launch codes.
     let catalog = std::env::var_os("LOCALAPPDATA")
         .and_then(|dir| Catalog::load(&Path::new(&dir).join(r"Battle.net\Cache")));
 
@@ -110,7 +110,7 @@ fn install_dir(settings: &[u8]) -> crate::Result<PathBuf> {
     Ok(dir)
 }
 
-/// Just enough of the protobuf wire format to walk product.db.
+/// The part of the protobuf wire format that product.db needs.
 mod proto {
     pub enum Value<'a> {
         Bytes(&'a [u8]),
@@ -189,7 +189,7 @@ impl Catalog {
         let main = find_main_index(cache)?;
         let mut fragments = Vec::new();
         for fragment in main["fragments"].as_array()? {
-            // Entries with requirements are regional variants (e.g. China); the base one is enough.
+            // Entries with requirements are regional variants (like China); the base one is enough.
             if fragment.get("requires").is_some() {
                 continue;
             }

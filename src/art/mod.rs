@@ -13,15 +13,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Slot {
-    /// Portrait capsule in the library grid.
+    /// The cover: the portrait image in the library grid.
     Cover,
-    /// The banner at the top of the game's page. Steam calls it the hero.
+    /// The header: the banner at the top of the game's page. Steam calls it the hero.
     Hero,
-    /// Transparent title logo that Steam shows over the header.
+    /// The logo: the game's title on a transparent background, which Steam shows over the header.
     Logo,
-    /// Landscape capsule, used by "recent games" and some views.
+    /// The wide cover: the landscape image in "recent games" and some other views.
     Wide,
-    /// Small icon in lists. Steam reads it from the shortcut, not from the grid folder name.
+    /// The icon in lists. Steam reads its path from the shortcut, not from a name in the grid folder.
     Icon,
 }
 
@@ -145,8 +145,8 @@ pub struct Crop {
 }
 
 impl Crop {
-    /// The default crop: the largest area with the slot's shape, placed by `anchor`. The UI
-    /// computes the same default (`defaultCrop` in ui/app.js).
+    /// The default crop: the largest area with the slot's shape, placed by `anchor`. The window
+    /// computes the same default (`defaultCrop` in ui/app.js); keep the two the same.
     pub fn default_for(source: (u32, u32), shape: (u32, u32), anchor: Anchor) -> Self {
         let source_ratio = f64::from(source.0) / f64::from(source.1);
         let ratio = f64::from(shape.0) / f64::from(shape.1);

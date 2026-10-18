@@ -65,7 +65,7 @@ fn encode(image: &DynamicImage, format: ImageFormat) -> crate::Result<Rendered> 
     Ok(Rendered { bytes, ext })
 }
 
-/// The MIME type of an image, for serving it to the UI.
+/// The MIME type of an image, for serving it to the window.
 pub fn mime(bytes: &[u8]) -> &'static str {
     match image::guess_format(bytes) {
         Ok(ImageFormat::Png) => "image/png",

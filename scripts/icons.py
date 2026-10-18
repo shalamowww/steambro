@@ -2,7 +2,7 @@
 """Draws steambro's cloud in its three moods and renders the icon files.
 
 Writes, relative to the repository:
-  ui/logo-<mood>.svg            the cloud in full detail, for the window's top bar
+  ui/logo-<mood>.svg            the cloud in full detail, for the top of the window's sidebar
   icons/icon.png, icon.ico      the app icon (wink); the ico's images up to 32 px use the small drawing
   icons/tray-<mood>-<size>.png  the tray icon at 16, 20, 24 and 32 px, small drawing
 

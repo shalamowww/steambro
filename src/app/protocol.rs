@@ -17,7 +17,7 @@ use crate::sync;
 pub fn handle<R: Runtime>(ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8>>, responder: UriSchemeResponder) {
     let app = ctx.app_handle().clone();
     let path = request.uri().path().to_string();
-    // Fetching can take a while; don't hold up the window's other requests.
+    // A fetch can take a while, so it runs on its own thread and the window's other requests don't wait.
     std::thread::spawn(move || {
         let found = image(&app.state::<Shared>(), &path);
         let response = match found {
