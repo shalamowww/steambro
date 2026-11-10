@@ -1,0 +1,131 @@
+//! What steambro has done, in `%LOCALAPPDATA%\steambro\state.json`: the shortcuts it added, what
+//! happened to each artwork slot, and the artwork changes the user made in steambro.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+use crate::art::{Crop, Slot};
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct State {
+    #[serde(default)]
+    pub shortcuts: Vec<TrackedShortcut>,
+    /// By game key. Applies to every account, and to games not added yet.
+    #[serde(default)]
+    pub art: BTreeMap<String, BTreeMap<Slot, ArtChoice>>,
+    /// The game keys the tray app has seen installed, so that it tells about each new game once.
+    /// `None` until its first look.
+    #[serde(default)]
+    pub seen: Option<BTreeSet<String>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TrackedShortcut {
+    pub steam_user: u32,
+    /// The game's key, like `xbox:<AUMID>` or `battlenet:s2`.
+    pub game: String,
+    /// Steam's ID for the shortcut. It stays the same when the user renames it in Steam.
+    pub app_id: u32,
+    /// A slot without an entry hasn't been tried yet.
+    #[serde(default)]
+    pub art: BTreeMap<Slot, Placement>,
+    /// When steambro added it, in seconds since 1970; none for shortcuts added before steambro kept it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added: Option<u64>,
+    /// The fingerprint of each image steambro wrote into a slot (`sync::fingerprint`), so that it
+    /// can tell its own file from one the user set in Steam since. Records from before steambro
+    /// kept them have none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fingerprints: BTreeMap<Slot, String>,
+}
+
+/// What happened to one artwork slot of a steambro shortcut.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Placement {
+    /// steambro wrote the file. It changes again when the user edits it in steambro, or when the
+    /// store's image changes and the slot follows the store (`ArtChoice::follows`).
+    Written,
+    /// Steam already had an image there; steambro leaves it alone.
+    Kept,
+    /// The image couldn't be fetched (for example, no connection). Tried again at the next start.
+    Pending,
+    /// The store had no image for this slot. Tried again when the window opens, if the slot
+    /// follows the store.
+    Unavailable,
+}
+
+#[derive(Default, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct ArtChoice {
+    /// `None` means the centered default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
+    /// The cached source is the user's own image, not the store's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own: bool,
+    /// The user turned off updates from the store: steambro's copy of the store's image stays. It
+    /// stays set through the user's own image, so that a reset to the store's image doesn't follow.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fixed: bool,
+    /// The file the user's own image came from, so that the file dialog opens beside it next time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<PathBuf>,
+}
+
+impl ArtChoice {
+    /// The slot takes the store's newer images (`sync::refresh`): the user's own image and a
+    /// store's image the user fixed stay as they are.
+    pub fn follows(&self) -> bool {
+        !self.own && !self.fixed
+    }
+}
+
+impl State {
+    pub fn load() -> crate::Result<Self> {
+        let path = Self::path()?;
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        serde_json::from_slice(&std::fs::read(&path)?).map_err(|e| format!("{} is damaged: {e}", path.display()).into())
+    }
+
+    /// Writes a new file and then replaces the old one, so a crash can't leave half a file.
+    pub fn save(&self) -> crate::Result<()> {
+        let path = Self::path()?;
+        std::fs::create_dir_all(path.parent().expect("state path has a parent"))?;
+        let temp = path.with_extension("json.new");
+        std::fs::write(&temp, serde_json::to_vec_pretty(self)?)?;
+        std::fs::rename(&temp, &path)?;
+        Ok(())
+    }
+
+    pub fn find(&self, steam_user: u32, game: &str) -> Option<&TrackedShortcut> {
+        self.shortcuts.iter().find(|s| s.steam_user == steam_user && s.game == game)
+    }
+
+    pub fn find_mut(&mut self, steam_user: u32, game: &str) -> Option<&mut TrackedShortcut> {
+        self.shortcuts.iter_mut().find(|s| s.steam_user == steam_user && s.game == game)
+    }
+
+    pub fn choice(&self, game: &str, slot: Slot) -> ArtChoice {
+        self.art.get(game).and_then(|slots| slots.get(&slot)).cloned().unwrap_or_default()
+    }
+
+    pub fn set_choice(&mut self, game: &str, slot: Slot, choice: ArtChoice) {
+        let slots = self.art.entry(game.to_string()).or_default();
+        if choice.crop.is_none() && !choice.own && !choice.fixed && choice.file.is_none() {
+            slots.remove(&slot);
+        } else {
+            slots.insert(slot, choice);
+        }
+        if slots.is_empty() {
+            self.art.remove(game);
+        }
+    }
+
+    fn path() -> crate::Result<PathBuf> {
+        Ok(crate::data_dir()?.join("state.json"))
+    }
+}
