@@ -1,0 +1,5 @@
+# The GNU toolchain builds steambro without Visual Studio: rustup installs it, and scoop's mingw
+# provides windres for the exe's resources. With it, WebView2Loader.dll sits beside the exe.
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
+profile = "minimal"

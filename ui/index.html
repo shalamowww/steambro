@@ -1,0 +1,103 @@
+<!doctype html>
+<!-- steambro's main window: the skeleton that app.js fills. The scripts run in this order: choice.js
+     and logos.js define what app.js uses. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>steambro</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="i18n.js" defer></script>
+  <script src="choice.js" defer></script>
+  <script src="logos.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!-- The window has no Windows title bar. Empty parts marked data-drag move the window (app.js). -->
+  <!-- The texts: data-t fills the content, data-t-title and the like the attribute, from ui/i18n
+       (translatePage in i18n.js). -->
+  <aside class="sidebar" aria-label="Library" data-t-aria-label="sections.all">
+    <button class="icon-button" id="open-settings" title="Settings" aria-label="Settings" data-t-title="sidebar.settings" data-t-aria-label="sidebar.settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+    <div class="brand" data-drag>
+      <span class="logo-box"><img id="logo" src="logo-wink.svg" alt="steambro" width="128" height="128" draggable="false"></span>
+      <span class="brand-name">steambro</span>
+    </div>
+    <!-- The games that wait for Steam to restart or change in Steam now, with the button that
+         restarts it (renderSteamChanges) -->
+    <section class="steam-changes" id="steam-changes" hidden aria-label="Changes in Steam" data-t-aria-label="changes.aria" aria-live="polite"></section>
+    <!-- A connected controller that won't reach an installed Xbox game, with the way to fix it
+         (renderControllerAlert) -->
+    <section class="controller-alert" id="controller-alert" hidden aria-label="Controller" data-t-aria-label="alert.aria" aria-live="polite"></section>
+    <div class="side-head">
+      <button class="side-title" id="all-games" title="Show all games as tiles" data-t-title="sidebar.show_all"><span data-t="sections.all">Library</span> <span class="count" id="all-count"></span></button>
+      <button class="icon-button small" id="refresh" title="Look for games again" aria-label="Look for games again" data-t-title="sidebar.refresh" data-t-aria-label="sidebar.refresh">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+      </button>
+      <button class="icon-button small" id="add-exe" title="Add a game by its exe" aria-label="Add a game by its exe" data-t-title="sidebar.add_exe" data-t-aria-label="sidebar.add_exe">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+    <nav class="sections" id="sections" aria-label="Games by status" data-t-aria-label="sidebar.sections_aria"></nav>
+  </aside>
+
+  <main class="content">
+    <!-- The title bar: a blurred stripe across the content's top, which moves the window -->
+    <div class="top-stripe" data-drag></div>
+    <!-- The way back from a game's page to its section, in the stripe's left end -->
+    <button class="back" id="back" hidden>
+      <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M6.5 1.5L3 5l3.5 3.5"/></svg>
+      <!-- The controller's B, shown while a controller moves (controller navigation in app.js) -->
+      <span class="pad pad-mark pad-b" aria-hidden="true">B</span>
+      <span id="back-label"></span>
+    </button>
+    <!-- The Steam account and the window buttons, cut into the content's top right corner so they
+         show over any artwork -->
+    <div class="window-controls">
+      <span class="account" id="account"></span>
+      <button class="wc" id="wc-min" title="Minimize" aria-label="Minimize" data-t-title="window.minimize" data-t-aria-label="window.minimize">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10"/></svg>
+      </button>
+      <button class="wc" id="wc-max" title="Maximize" aria-label="Maximize" data-t-title="window.maximize" data-t-aria-label="window.maximize">
+        <svg class="max" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"/></svg>
+        <svg class="restore" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5V0.5h7v7h-2M0.5 2.5h7v7h-7z"/></svg>
+      </button>
+      <button class="wc close" id="wc-close" title="Close to the tray" aria-label="Close to the tray" data-t-title="window.close_to_tray" data-t-aria-label="window.close_to_tray">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9"/></svg>
+      </button>
+    </div>
+
+    <section id="tiles" class="view tiles" aria-label="Games" data-t-aria-label="tiles.aria">
+      <header class="tiles-head" data-drag>
+        <div class="tiles-heading">
+          <h1 id="tiles-title"></h1>
+          <p id="tiles-hint"></p>
+        </div>
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="search" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search the games shown" data-t-placeholder="tiles.search_placeholder" data-t-aria-label="tiles.search_aria">
+          <span class="pad pad-mark pad-wide pad-only" aria-hidden="true">&#10697;</span>
+        </label>
+      </header>
+      <!-- The selection on the left, the store tags on the right under the search -->
+      <div class="toolbar">
+        <div class="selection" id="selection"></div>
+        <div class="tags" id="tags" role="group" aria-label="Show games from these stores" data-t-aria-label="tiles.tags_aria"></div>
+      </div>
+      <div id="library" class="library"></div>
+    </section>
+    <section id="detail" class="view detail" hidden aria-label="Game" data-t-aria-label="game.aria"></section>
+
+    <div id="notices" class="notices"></div>
+    <!-- What the controller's buttons do where the focus is, in the content's bottom right corner,
+         or in the settings window's bar while it is open (body.pad-nav, renderPadHints in app.js) -->
+    <div id="pad-hints" class="pad-strip" aria-hidden="true"></div>
+  </main>
+
+  <div id="toasts" class="toasts" role="status"></div>
+  <dialog id="settings" class="settings-window" aria-label="Settings" data-t-aria-label="sidebar.settings"></dialog>
+  <dialog id="dialog" class="dialog"></dialog>
+  <div id="menu" class="menu" role="menu" hidden></div>
+</body>
+</html>

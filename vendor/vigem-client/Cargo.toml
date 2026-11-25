@@ -1,0 +1,23 @@
+# vigem-client 0.1.4 from crates.io, with one change for steambro: `Xbox360Wired::plugin_at`
+# (src/x360.rs). steambro's Cargo.toml patches crates.io's copy with this one.
+[package]
+name = "vigem-client"
+version = "0.1.4"
+authors = ["Casper <CasualX@users.noreply.github.com>"]
+edition = "2018"
+license = "MIT"
+
+description = "ViGEm client API in pure Rust."
+documentation = "https://docs.rs/vigem-client/"
+repository = "https://github.com/CasualX/vigem-client"
+readme = "readme.md"
+categories = ["api-bindings"]
+
+[features]
+# Include the DS4Target target
+unstable_ds4 = []
+# Include the XTarget notification API
+unstable_xtarget_notification = []
+
+[dependencies]
+winapi = { version = "0.3", features = ["std", "handleapi", "setupapi", "fileapi", "winbase", "ioapiset", "synchapi", "errhandlingapi", "xinput", "winerror"] }
